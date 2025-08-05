@@ -1,7 +1,7 @@
 const mongoose = require('mongoose');
 require('dotenv').config({ path: './config.env' });
 
-class Database {
+class MongoDB {
   constructor() {
     this.connection = null;
   }
@@ -81,4 +81,4 @@ class Database {
   }
 }
 
-module.exports = new Database();
+module.exports = new MongoDB(); 

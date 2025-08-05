@@ -74,7 +74,7 @@ app.use((req, res, next) => {
 // Health check
 app.get('/health', async (req, res) => {
   try {
-    await database.query('SELECT 1');
+    await database.healthCheck();
     await redisClient.client.ping();
     
     res.status(200).json({ 
@@ -95,12 +95,31 @@ app.get('/health', async (req, res) => {
 });
 
 // Import routes
-const ticketRoutes = require('./routes/ticketRoutes');
+const ticketRoutes = require('./routes/tickets');
+const emailRoutes = require('./routes/emailRoutes');
+
+// Import services
+const notificationService = require('./services/notificationService');
+const chatService = require('./services/chatService');
 
 // Use routes
 app.use("/api/tickets", ticketRoutes);
+app.use("/api/email", emailRoutes);
+
+// Frappe compatible routes
 app.use("/api/method", ticketRoutes);
 app.use("/api/resource", ticketRoutes);
+
+// Initialize services
+(async () => {
+  try {
+    // Subscribe to chat events
+    await chatService.subscribeToChatEvents();
+    console.log('✅ [Ticket Service] Services initialized successfully');
+  } catch (error) {
+    console.error('❌ [Ticket Service] Error initializing services:', error);
+  }
+})();
 
 // Socket.IO events
 io.on('connection', (socket) => {
