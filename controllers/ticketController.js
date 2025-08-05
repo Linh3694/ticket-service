@@ -2,7 +2,7 @@ const Ticket = require("../models/Ticket");
 const User = require("../models/User"); // Import model User nếu chưa import
 const SupportTeam = require("../models/SupportTeam");
 const Chat = require("../models/Chat"); // Thêm import Chat model
-const notificationController = require('../Notification/notificationController'); // Thêm import
+const notificationService = require('../services/notificationService'); // Thay thế bằng notificationService
 const mongoose = require("mongoose");
 
 
@@ -58,7 +58,7 @@ exports.createTicket = async (req, res) => {
     await newTicket.save();
 
     // Gửi thông báo đến admin và technical
-    await notificationController.sendNewTicketNotification(newTicket);
+    await notificationService.sendNewTicketNotification(newTicket);
 
     res.status(201).json({ success: true, ticket: newTicket });
   } catch (error) {
@@ -232,11 +232,11 @@ exports.updateTicket = async (req, res) => {
     }
 
     // Gửi thông báo cập nhật (đã bao gồm thông báo cho creator và superadmin)
-    await notificationController.sendTicketUpdateNotification(ticket, action);
+    await notificationService.sendTicketUpdateNotification(ticket, action);
 
     // Nếu đây là action feedback_added, gửi thêm thông báo feedback
     if (action === 'feedback_added' && ticket.feedback) {
-      await notificationController.sendFeedbackNotification(ticket);
+      await notificationService.sendFeedbackNotification(ticket);
     }
 
     res.status(200).json({ success: true, ticket });
@@ -316,7 +316,7 @@ exports.addFeedback = async (req, res) => {
     await ticket.save();
 
     // Gửi thông báo khi khách hàng gửi feedback
-    await notificationController.sendFeedbackNotification(ticket);
+    await notificationService.sendFeedbackNotification(ticket);
 
     return res.status(200).json({
       success: true,
@@ -506,7 +506,7 @@ exports.sendMessage = async (req, res) => {
     io.to(ticketId).emit("newMessage", messageData);
 
     // Gửi thông báo có tin nhắn mới - không gửi cho người gửi
-    await notificationController.sendTicketUpdateNotification(ticket, 'comment_added', req.user._id);
+    await notificationService.sendTicketUpdateNotification(ticket, 'comment_added', req.user._id);
 
     return res.status(200).json({
       success: true,
