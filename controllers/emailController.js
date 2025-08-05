@@ -3,11 +3,30 @@ const nodemailer = require("nodemailer");
 const { ClientSecretCredential } = require("@azure/identity");
 const { Client } = require("@microsoft/microsoft-graph-client");
 const { TokenCredentialAuthenticationProvider } = require("@microsoft/microsoft-graph-client/authProviders/azureTokenCredentials");
-const Ticket = require("../../models/Ticket");
-const User = require("../../models/Users");
+const Ticket = require("../models/Ticket");
 const { v4: uuidv4 } = require("uuid");
 const ticketController = require("./ticketController");
 const { convert } = require('html-to-text'); // Added import for html-to-text
+const axios = require('axios');
+
+// Frappe API configuration
+const FRAPPE_API_URL = process.env.FRAPPE_API_URL || 'http://172.16.20.130:8000';
+
+// Helper function to get user from Frappe
+async function getFrappeUserByEmail(email, token) {
+  try {
+    const response = await axios.get(`${FRAPPE_API_URL}/api/resource/User?filters=[["email","=","${email}"]]`, {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'X-Frappe-CSRF-Token': token
+      }
+    });
+    return response.data.data && response.data.data.length > 0 ? response.data.data[0] : null;
+  } catch (error) {
+    console.error('Error getting user from Frappe by email:', error);
+    return null;
+  }
+}
 
 // Khởi tạo OAuth 2.0 credentials
 const credential = process.env.TENANTTICKET_ID ? new ClientSecretCredential(
@@ -147,27 +166,29 @@ exports.fetchEmailsAndCreateTickets = async (req, res) => {
             }
 
       // Tìm user dựa trên email người gửi
-      let creatorUser = await User.findOne({ email: from });
+      let creatorUser = await getFrappeUserByEmail(from, process.env.FRAPPE_API_TOKEN);
 
       // Nếu không tìm thấy user, tạo user tạm thời
       if (!creatorUser) {
         console.log(`Không tìm thấy user với email ${from}, tạo user tạm thời...`);
-        creatorUser = await User.create({
-          email: from,
-          fullname: from.split("@")[0], // Lấy phần trước @ làm tên tạm
-          role: "user", // Gán role mặc định
-          password: "temporaryPassword", // Mật khẩu tạm (nên mã hóa trong thực tế)
-        });
-        console.log("Đã tạo user tạm:", creatorUser._id);
+        // In this case, we cannot create a user in Frappe directly from here.
+        // We would need to handle this case by returning an error or skipping the ticket creation.
+        // For now, we'll just log and continue.
+        console.log(`Không thể tạo user tạm thời với email ${from} trong Frappe.`);
+        await graphClient
+          .api(`/users/${userEmail}/messages/${msg.id}`)
+          .update({ isRead: true });
+        console.log(`Đã đánh dấu email ${msg.id} là đã đọc (bỏ qua)`);
+        continue; // Bỏ qua email này
       }
 
         const newTicket = await ticketController.createTicketHelper({
             title: subject,
             description: plainContent,
-            creatorId: creatorUser._id,
+            creatorId: creatorUser.name, // Sử dụng user name từ Frappe
             priority: "Medium",
             files: attachments,  // Email ko có file attach tạm
-            });
+        });
 
 
       // Đánh dấu email là đã đọc
