@@ -1,8 +1,5 @@
 // /backend/controllers/emailController.js
 const nodemailer = require("nodemailer");
-const { ClientSecretCredential } = require("@azure/identity");
-const { Client } = require("@microsoft/microsoft-graph-client");
-const { TokenCredentialAuthenticationProvider } = require("@microsoft/microsoft-graph-client/authProviders/azureTokenCredentials");
 const Ticket = require("../models/Ticket");
 const { v4: uuidv4 } = require("uuid");
 const ticketController = require("./ticketController");
@@ -28,23 +25,45 @@ async function getFrappeUserByEmail(email, token) {
   }
 }
 
-// Khởi tạo OAuth 2.0 credentials
-const credential = process.env.TENANTTICKET_ID ? new ClientSecretCredential(
-  process.env.TENANTTICKET_ID,
-  process.env.CLIENTTICKET_ID,
-  process.env.CLIENTTICKET_SECRET
-) : null;
+// Initialize Azure Graph client only if credentials are available
+let graphClient = null;
+let credential = null;
 
-const authProvider = new TokenCredentialAuthenticationProvider(credential, {
-  scopes: ["https://graph.microsoft.com/.default"],
-});
+if (process.env.TENANT_ID && process.env.CLIENT_ID && process.env.CLIENT_SECRET) {
+  try {
+    const { ClientSecretCredential } = require("@azure/identity");
+    const { Client } = require("@microsoft/microsoft-graph-client");
+    const { TokenCredentialAuthenticationProvider } = require("@microsoft/microsoft-graph-client/authProviders/azureTokenCredentials");
 
-const graphClient = Client.initWithMiddleware({
-  authProvider: authProvider,
-});
+    // Khởi tạo OAuth 2.0 credentials
+    credential = new ClientSecretCredential(
+      process.env.TENANT_ID,
+      process.env.CLIENT_ID,
+      process.env.CLIENT_SECRET
+    );
+
+    const authProvider = new TokenCredentialAuthenticationProvider(credential, {
+      scopes: ["https://graph.microsoft.com/.default"],
+    });
+
+    graphClient = Client.initWithMiddleware({
+      authProvider: authProvider,
+    });
+    
+    console.log('✅ [Ticket Service] Azure Graph client initialized');
+  } catch (error) {
+    console.warn('⚠️ [Ticket Service] Azure Graph client initialization failed:', error.message);
+  }
+} else {
+  console.warn('⚠️ [Ticket Service] Azure credentials not found, email features will be disabled');
+}
 
 // Hàm lấy access token cho OAuth 2.0
 const getAccessToken = async () => {
+  if (!credential) {
+    throw new Error('Azure credential not initialized');
+  }
+  
   try {
     console.log("Đang lấy access token...");
     const token = await credential.getToken("https://graph.microsoft.com/.default");
@@ -58,6 +77,10 @@ const getAccessToken = async () => {
 
 // Khởi tạo transporter cho SMTP (dùng OAuth 2.0)
 const createTransporter = async () => {
+  if (!credential) {
+    throw new Error('Azure credential not initialized');
+  }
+  
   const accessToken = await getAccessToken();
 
   console.log("Đang tạo transporter SMTP...");
@@ -81,6 +104,13 @@ const createTransporter = async () => {
 // A) Hàm gửi email cập nhật trạng thái ticket
 exports.sendTicketStatusEmail = async (req, res) => {
   try {
+    if (!credential) {
+      return res.status(500).json({ 
+        success: false, 
+        message: "Azure credential not initialized. Please check Azure credentials." 
+      });
+    }
+
     const { ticketId, recipientEmail } = req.body;
     console.log("Đang gửi email cho ticket:", ticketId, "tới:", recipientEmail);
 
@@ -112,6 +142,12 @@ exports.sendTicketStatusEmail = async (req, res) => {
 // B) Hàm đọc email từ inbox và tạo ticket (dùng Microsoft Graph API)
 exports.fetchEmailsAndCreateTickets = async (req, res) => {
   try {
+    if (!credential || !graphClient) {
+      return res.status(500).json({ 
+        success: false, 
+        message: "Azure Graph client not initialized. Please check Azure credentials." 
+      });
+    }
 
     // Sử dụng /users/{EMAIL_USER} thay vì /me
     const userEmail = process.env.EMAIL_USER;
