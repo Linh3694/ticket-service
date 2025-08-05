@@ -1,7 +1,7 @@
-const Ticket = require("../../models/Ticket");
-const User = require("../../models/Users"); // Import model User nếu chưa import
-const SupportTeam = require("../../models/SupportTeam");
-const Chat = require("../../models/Chat"); // Thêm import Chat model
+const Ticket = require("../models/Ticket");
+const User = require("../models/User"); // Import model User nếu chưa import
+const SupportTeam = require("../models/SupportTeam");
+const Chat = require("../models/Chat"); // Thêm import Chat model
 const notificationController = require('../Notification/notificationController'); // Thêm import
 const mongoose = require("mongoose");
 
