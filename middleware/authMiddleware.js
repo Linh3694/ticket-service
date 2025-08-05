@@ -2,8 +2,6 @@ const axios = require('axios');
 
 // Frappe API configuration
 const FRAPPE_API_URL = process.env.FRAPPE_API_URL || 'http://172.16.20.130:8000';
-const FRAPPE_API_KEY = process.env.FRAPPE_API_KEY;
-const FRAPPE_API_SECRET = process.env.FRAPPE_API_SECRET;
 
 const authenticate = async (req, res, next) => {
   try {
