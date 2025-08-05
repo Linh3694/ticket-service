@@ -1,11 +1,9 @@
 const express = require("express");
 const router = express.Router();
-const ticketController = require("../../controllers/Ticket/ticketController");
-const { authenticate } = require("../../middleware/authMiddleware");
-const upload = require("../../middleware/uploadTicket");
-const uploadMessage = require("../../middleware/uploadMessage");
-
-
+const ticketController = require("../controllers/ticketController");
+const { authenticate } = require("../middleware/authMiddleware");
+const upload = require("../middleware/uploadTicket");
+const uploadMessage = require("../middleware/uploadMessage");
 
 // a) Tạo ticket
 router.post("/", authenticate, upload.array("attachments", 15), ticketController.createTicket);
