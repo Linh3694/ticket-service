@@ -8,8 +8,9 @@ class Database {
 
   async connect() {
     try {
+      // Sử dụng MongoDB local cho ticket service  
       const uri = process.env.MONGODB_URI || 
-        `mongodb://${process.env.MONGODB_HOST}:${process.env.MONGODB_PORT}/${process.env.MONGODB_DATABASE}`;
+        `mongodb://${process.env.MONGODB_HOST || 'localhost'}:${process.env.MONGODB_PORT || 27017}/${process.env.MONGODB_DATABASE || 'wellspring_tickets'}`;
 
       const options = {
         useNewUrlParser: true,
@@ -17,6 +18,9 @@ class Database {
         maxPoolSize: 10,
         serverSelectionTimeoutMS: 5000,
         socketTimeoutMS: 45000,
+        // Tối ưu cho local development
+        bufferMaxEntries: 0,
+        connectTimeoutMS: 10000,
       };
 
       // Add authentication if credentials are provided
@@ -27,9 +31,11 @@ class Database {
         };
       }
 
+      console.log(`🔗 [Ticket Service] Connecting to MongoDB: ${uri}`);
       this.connection = await mongoose.connect(uri, options);
       
-      console.log('✅ [Ticket Service] MongoDB connected successfully');
+      console.log('✅ [Ticket Service] MongoDB local connection established successfully');
+      console.log(`📊 [Ticket Service] Database: ${mongoose.connection.name}`);
       
       // Handle connection events
       mongoose.connection.on('error', (err) => {
