@@ -2,17 +2,18 @@ module.exports = {
   apps: [{
     name: 'ticket-service',
     script: 'app.js',
-    instances: 1,
+    instances: 2,
+    instance_var: 'INSTANCE_ID',
     autorestart: true,
     watch: false,
     max_memory_restart: '1G',
     env: {
       NODE_ENV: 'development',
-      PORT: 5004
+      PORT: 5001
     },
     env_production: {
       NODE_ENV: 'production',
-      PORT: 5004
+      PORT: 5001
     },
     error_file: './logs/err.log',
     out_file: './logs/out.log',

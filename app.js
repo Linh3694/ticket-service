@@ -172,8 +172,13 @@ app.use('*', (req, res) => {
 
 // Start server
 const PORT = process.env.PORT || 5004;
-server.listen(PORT, () => {
-  console.log(`🚀 [Ticket Service] Server running on port ${PORT}`);
+const INSTANCE_ID = process.env.INSTANCE_ID || 0;
+
+// Nếu chạy multiple instances, mỗi instance sẽ dùng port khác nhau
+const instancePort = parseInt(PORT) + parseInt(INSTANCE_ID);
+
+server.listen(instancePort, () => {
+  console.log(`🚀 [Ticket Service] Instance ${INSTANCE_ID} running on port ${instancePort}`);
 });
 
 connectDB();
