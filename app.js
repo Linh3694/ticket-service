@@ -103,7 +103,7 @@ const notificationService = require('./services/notificationService');
 const chatService = require('./services/chatService');
 
 // Use routes
-app.use("/api/tickets", ticketRoutes);
+app.use("/api/ticket", ticketRoutes);
 app.use("/api/email", emailRoutes);
 
 // Frappe compatible routes
