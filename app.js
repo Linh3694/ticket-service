@@ -71,25 +71,66 @@ app.use((req, res, next) => {
   next();
 });
 
-// Health check
+// Health check với kiểm tra tất cả services
 app.get('/health', async (req, res) => {
   try {
-    await database.healthCheck();
-    await redisClient.client.ping();
-    
-    res.status(200).json({ 
-      status: 'ok', 
+    const healthStatus = {
+      status: 'ok',
       service: 'ticket-service',
       version: '1.0.0',
-      timestamp: new Date().toISOString(),
-      database: 'connected',
-      redis: 'connected'
-    });
+      timestamp: new Date().toISOString()
+    };
+
+    // Kiểm tra database
+    try {
+      await database.healthCheck();
+      healthStatus.database = 'connected';
+    } catch (error) {
+      healthStatus.database = 'error';
+      healthStatus.database_error = error.message;
+    }
+
+    // Kiểm tra Redis
+    try {
+      await redisClient.client.ping();
+      healthStatus.redis = 'connected';
+    } catch (error) {
+      healthStatus.redis = 'error';
+      healthStatus.redis_error = error.message;
+    }
+
+    // Kiểm tra Chat service
+    const chatHealth = await chatService.healthCheck();
+    healthStatus.chat_service = chatHealth.status;
+    if (chatHealth.status === 'error') {
+      healthStatus.chat_error = chatHealth.message;
+    }
+
+    // Kiểm tra Notification service
+    const notificationHealth = await notificationService.healthCheck();
+    healthStatus.notification_service = notificationHealth.status;
+    if (notificationHealth.status === 'error') {
+      healthStatus.notification_error = notificationHealth.message;
+    }
+
+    // Xác định status tổng thể
+    const criticalServices = ['database', 'redis'];
+    const hasCriticalError = criticalServices.some(service => 
+      healthStatus[service] === 'error'
+    );
+
+    if (hasCriticalError) {
+      healthStatus.status = 'degraded';
+      res.status(503).json(healthStatus);
+    } else {
+      res.status(200).json(healthStatus);
+    }
   } catch (error) {
     res.status(500).json({
       status: 'error',
       service: 'ticket-service',
-      error: error.message
+      error: error.message,
+      timestamp: new Date().toISOString()
     });
   }
 });
