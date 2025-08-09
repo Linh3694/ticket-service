@@ -171,20 +171,26 @@ exports.sendTicketStatusEmail = async (req, res) => {
 };
 
 // Core inbox processor (reusable for route and background job)
-async function processInboxOnce() {
+async function processInboxOnce(options = {}) {
+  const { includeRead = false, limit = 50 } = options;
   if (!credential || !graphClient) {
     console.warn('[Ticket Service] Graph client not initialized - skip email polling');
     return { success: false, reason: 'graph_not_initialized', created: 0, skipped: 0 };
   }
 
   const userEmail = process.env.EMAIL_USER;
-  const messages = await graphClient
+  let request = graphClient
     .api(`/users/${userEmail}/mailFolders/Inbox/messages`)
-    .filter('isRead eq false')
-    .select('subject,from,body,hasAttachments')
+    .select('id,subject,from,body,hasAttachments,isRead,receivedDateTime')
     .expand('attachments')
-    .top(50)
-    .get();
+    .top(Math.min(Number(limit) || 50, 100))
+    .orderby('receivedDateTime desc');
+
+  if (!includeRead) {
+    request = request.filter('isRead eq false');
+  }
+
+  const messages = await request.get();
 
   const list = messages.value || [];
   if (!list.length) {
@@ -203,13 +209,17 @@ async function processInboxOnce() {
       const content = msg.body?.content || '';
       const lowerSubject = subject.trim().toLowerCase();
       if (lowerSubject.startsWith('re:') || lowerSubject.startsWith('trả lời:')) {
-        await graphClient.api(`/users/${userEmail}/messages/${msg.id}`).update({ isRead: true });
+        if (!msg.isRead) {
+          await graphClient.api(`/users/${userEmail}/messages/${msg.id}`).update({ isRead: true });
+        }
         skipped++; continue;
       }
 
       // Only accept internal domain
       if (!from.endsWith('@wellspring.edu.vn')) {
-        await graphClient.api(`/users/${userEmail}/messages/${msg.id}`).update({ isRead: true });
+        if (!msg.isRead) {
+          await graphClient.api(`/users/${userEmail}/messages/${msg.id}`).update({ isRead: true });
+        }
         skipped++; continue;
       }
 
@@ -219,7 +229,9 @@ async function processInboxOnce() {
       const creatorUser = await getFrappeUserByEmail(from);
       if (!creatorUser) {
         console.warn(`[Ticket Service] Không tìm thấy user Frappe cho ${from}, đánh dấu đã đọc và bỏ qua`);
-        await graphClient.api(`/users/${userEmail}/messages/${msg.id}`).update({ isRead: true });
+        if (!msg.isRead) {
+          await graphClient.api(`/users/${userEmail}/messages/${msg.id}`).update({ isRead: true });
+        }
         skipped++; continue;
       }
 
@@ -227,9 +239,28 @@ async function processInboxOnce() {
       const localCreatorId = await getLocalUserIdByEmail(from);
       if (!localCreatorId) {
         console.warn(`[Ticket Service] Không tìm thấy user LOCAL cho ${from}, đánh dấu đã đọc và bỏ qua`);
-        await graphClient.api(`/users/${userEmail}/messages/${msg.id}`).update({ isRead: true });
+        if (!msg.isRead) {
+          await graphClient.api(`/users/${userEmail}/messages/${msg.id}`).update({ isRead: true });
+        }
         skipped++; continue;
       }
+
+      // Prevent duplicates: skip if same subject by same creator within last 3 days
+      try {
+        const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000);
+        const dup = await Ticket.findOne({
+          title: subject,
+          creator: localCreatorId,
+          createdAt: { $gte: threeDaysAgo }
+        }).select('_id');
+        if (dup) {
+          console.log(`[Ticket Service] Bỏ qua email trùng lặp trong 3 ngày: ${subject} từ ${from}`);
+          if (!msg.isRead) {
+            await graphClient.api(`/users/${userEmail}/messages/${msg.id}`).update({ isRead: true });
+          }
+          skipped++; continue;
+        }
+      } catch (_) {}
 
       let attachments = [];
       if (msg.hasAttachments && msg.attachments?.value?.length) {
@@ -252,7 +283,9 @@ async function processInboxOnce() {
         console.log(`[Ticket Service] Tạo ticket từ email ${from}: ${newTicket.ticketCode}`);
       } catch (_) {}
 
-      await graphClient.api(`/users/${userEmail}/messages/${msg.id}`).update({ isRead: true });
+      if (!msg.isRead) {
+        await graphClient.api(`/users/${userEmail}/messages/${msg.id}`).update({ isRead: true });
+      }
       created++;
     } catch (e) {
       console.error('[Ticket Service] Error processing email:', e.message);
