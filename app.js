@@ -225,6 +225,11 @@ app.use("/api/resource", ticketRoutes);
           case 'user_created':
           case 'user_updated': {
             const u = data.user || data.data || {};
+            // Always-on concise log (even when DEBUG is off)
+            try {
+              const identifier = u.email || u.name || data.user_id || data.userId || 'unknown';
+              console.log(`[Ticket Service] user_event ${data.type}: ${identifier}`);
+            } catch (_) {}
             // If only name provided, try fetch from Frappe to get email
             if (!u.email && (u.name || data.user_id)) {
               const userId = u.name || data.user_id;
@@ -283,6 +288,9 @@ app.use("/api/resource", ticketRoutes);
               { $set: update },
               { upsert: true, new: true }
             );
+            try {
+              console.log(`[Ticket Service] user upserted: ${u.email || u.name}`);
+            } catch (_) {}
             break;
           }
           case 'frappe_doc_event': {
