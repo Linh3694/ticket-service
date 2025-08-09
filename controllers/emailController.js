@@ -44,6 +44,18 @@ async function getFrappeUserByEmail(email) {
   }
 }
 
+// Helper: map email -> local Users collection (_id)
+async function getLocalUserIdByEmail(email) {
+  try {
+    const Users = require('../models/Users');
+    const user = await Users.findOne({ email }).select('_id email fullname');
+    return user ? user._id : null;
+  } catch (err) {
+    console.warn('[Ticket Service] getLocalUserIdByEmail error:', err.message);
+    return null;
+  }
+}
+
 // Initialize Azure Graph client only if credentials are available
 let graphClient = null;
 let credential = null;
@@ -211,6 +223,14 @@ async function processInboxOnce() {
         skipped++; continue;
       }
 
+      // Map sang user local (Mongo) theo email để lấy _id làm creator
+      const localCreatorId = await getLocalUserIdByEmail(from);
+      if (!localCreatorId) {
+        console.warn(`[Ticket Service] Không tìm thấy user LOCAL cho ${from}, đánh dấu đã đọc và bỏ qua`);
+        await graphClient.api(`/users/${userEmail}/messages/${msg.id}`).update({ isRead: true });
+        skipped++; continue;
+      }
+
       let attachments = [];
       if (msg.hasAttachments && msg.attachments?.value?.length) {
         attachments = msg.attachments.value
@@ -218,13 +238,19 @@ async function processInboxOnce() {
           .map(att => ({ filename: att.name, url: `data:${att.contentType};base64,${att.contentBytes}` }));
       }
 
-      await ticketController.createTicketHelper({
+      // Chuyển attachments sang dạng tương thích với createTicketHelper (giống multer)
+      const helperFiles = attachments.map(att => ({ originalname: att.filename, filename: att.url }));
+
+      const newTicket = await ticketController.createTicketHelper({
         title: subject,
         description: plainContent,
-        creatorId: creatorUser.name,
+        creatorId: localCreatorId,
         priority: 'Medium',
-        files: attachments,
+        files: helperFiles,
       });
+      try {
+        console.log(`[Ticket Service] Tạo ticket từ email ${from}: ${newTicket.ticketCode}`);
+      } catch (_) {}
 
       await graphClient.api(`/users/${userEmail}/messages/${msg.id}`).update({ isRead: true });
       created++;
