@@ -43,12 +43,19 @@ const userSchema = new mongoose.Schema({
     default: "Unknown",
   },
 
+  // Legacy single role (kept for backward compatibility)
   role: {
     type: String,
     enum: [
       "admin", "teacher", "parent", "registrar", "admission", "bos", "principal", "service", "superadmin", "technical", "marcom", "hr", "bod", "user", "librarian"
     ],
     default: "user",
+  },
+
+  // New multi-roles synced from Frappe (e.g., ['IT Manager','IT Helpdesk'])
+  roles: {
+    type: [String],
+    default: [],
   },
 
   disabled: {
@@ -127,6 +134,7 @@ userSchema.index({ username: 1 });
 userSchema.index({ phone: 1 });
 userSchema.index({ employeeCode: 1 });
 userSchema.index({ role: 1 });
+userSchema.index({ roles: 1 });
 userSchema.index({ active: 1 });
 
 userSchema.pre('save', async function (next) {

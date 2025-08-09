@@ -171,6 +171,63 @@ app.use("/api/resource", ticketRoutes);
   try {
     // Subscribe to chat events
     await chatService.subscribeToChatEvents();
+
+    // Subscribe to user/role events via Redis
+    const redisClient = require('./config/redis');
+    const userChannel = process.env.REDIS_USER_CHANNEL || 'user_events';
+    await redisClient.subscribe(userChannel, async (msg) => {
+      try {
+        const data = typeof msg === 'string' ? JSON.parse(msg) : msg;
+        if (!data || !data.type) return;
+        const Users = require('./models/Users');
+        switch (data.type) {
+          case 'user_created':
+          case 'user_updated': {
+            const u = data.user || data.data || {};
+            if (!u.email && !u.name) return;
+            // Upsert user + roles[]
+            const update = {
+              email: u.email,
+              fullname: u.full_name || u.fullname || u.name,
+              avatarUrl: u.user_image || '',
+              department: u.department || '',
+              active: u.enabled === 1 || u.active === true,
+            };
+            if (Array.isArray(u.roles)) {
+              update.roles = u.roles; // requires schema support
+            }
+            await Users.findOneAndUpdate(
+              { email: u.email },
+              { $set: update },
+              { upsert: true, new: true }
+            );
+            break;
+          }
+          case 'user_role_assigned': {
+            const { email, role } = data;
+            if (!email || !role) return;
+            await Users.updateOne(
+              { email },
+              { $addToSet: { roles: role } }
+            );
+            break;
+          }
+          case 'user_role_removed': {
+            const { email, role } = data;
+            if (!email || !role) return;
+            await Users.updateOne(
+              { email },
+              { $pull: { roles: role } }
+            );
+            break;
+          }
+          default:
+            break;
+        }
+      } catch (e) {
+        console.warn('⚠️ [Ticket Service] Error handling user event:', e.message);
+      }
+    });
     console.log('✅ [Ticket Service] Services initialized successfully');
   } catch (error) {
     console.error('❌ [Ticket Service] Error initializing services:', error);
