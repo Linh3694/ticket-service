@@ -174,6 +174,23 @@ app.use("/api/resource", ticketRoutes);
 
     // Subscribe to user/role events via Redis
     const redisClient = require('./config/redis');
+    // Ensure Redis is connected before subscribing (avoid race with adapter init)
+    async function waitForRedisReady(maxMs = 15000) {
+      const start = Date.now();
+      while (true) {
+        try {
+          if (redisClient.subClient && redisClient.subClient.isOpen && redisClient.pubClient && redisClient.pubClient.isOpen) {
+            return;
+          }
+        } catch (_) {}
+        if (Date.now() - start > maxMs) {
+          console.warn('⚠️ [Ticket Service] Redis not ready after wait, proceeding to subscribe anyway');
+          return;
+        }
+        await new Promise((r) => setTimeout(r, 250));
+      }
+    }
+    await waitForRedisReady();
     const axios = require('axios');
     const FRAPPE_API_URL = process.env.FRAPPE_API_URL || 'https://admin.sis.wellspring.edu.vn';
     function buildFrappeHeaders() {
@@ -194,6 +211,9 @@ app.use("/api/resource", ticketRoutes);
       try {
         const data = typeof msg === 'string' ? JSON.parse(msg) : msg;
         if (!data || !data.type) return;
+        if (process.env.DEBUG_USER_EVENTS === '1') {
+          console.log('[Ticket Service] user_event received:', { type: data.type, hasUser: !!data.user, keys: Object.keys(data || {}) });
+        }
         const Users = require('./models/Users');
         switch (data.type) {
           case 'user_created':
@@ -220,10 +240,18 @@ app.use("/api/resource", ticketRoutes);
             try {
               let rolesRaw = u.roles;
               if (typeof rolesRaw === 'string') {
+                // Try strict JSON first
                 try {
                   rolesRaw = JSON.parse(rolesRaw);
                 } catch {
-                  rolesRaw = [];
+                  // Fallback: extract role names from string like "[ { role: 'Teacher' }, ... ]"
+                  const extracted = [];
+                  const regex = /role\s*:\s*['\"]([^'\"]+)['\"]/g;
+                  let match;
+                  while ((match = regex.exec(rolesRaw)) !== null) {
+                    extracted.push(match[1]);
+                  }
+                  rolesRaw = extracted;
                 }
               }
               if (Array.isArray(rolesRaw)) {
