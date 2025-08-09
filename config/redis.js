@@ -7,6 +7,7 @@ class RedisClient {
     this.pubClient = null;
     this.subClient = null; // for socket.io adapter
     this.userSubClient = null; // dedicated subscriber for business channels
+    this.secondarySubClient = null; // optional subscriber for Frappe's own Redis
   }
 
   async connect() {
@@ -52,6 +53,34 @@ class RedisClient {
       await this.userSubClient.connect();
 
       console.log('✅ [Ticket Service] Redis connected successfully');
+
+      // Optional: connect secondary subscriber to Frappe's Redis (e.g., redis_socketio)
+      const frappeUrl = process.env.FRAPPE_REDIS_URL || process.env.FRAPPE_REDIS_SOCKETIO;
+      const frappeHost = process.env.FRAPPE_REDIS_HOST;
+      const frappePort = process.env.FRAPPE_REDIS_PORT ? Number(process.env.FRAPPE_REDIS_PORT) : undefined;
+      const frappePassword = process.env.FRAPPE_REDIS_PASSWORD || undefined;
+      const frappeDb = process.env.FRAPPE_REDIS_DB ? Number(process.env.FRAPPE_REDIS_DB) : undefined;
+      if (frappeUrl || frappeHost) {
+        try {
+          const secondaryOpts = frappeUrl
+            ? { url: frappeUrl }
+            : {
+                socket: {
+                  host: frappeHost || '127.0.0.1',
+                  port: frappePort || 13000,
+                },
+                password: frappePassword,
+                database: frappeDb,
+              };
+          this.secondarySubClient = createClient(secondaryOpts);
+          this.secondarySubClient.on('error', (err) => console.error('[Ticket Service] Redis secondary-sub error:', err.message));
+          this.secondarySubClient.on('ready', () => console.log('[Ticket Service] Redis secondary user-sub ready'));
+          console.log('[Ticket Service] Connecting secondary subscriber to Frappe Redis:', frappeUrl || `${secondaryOpts.socket.host}:${secondaryOpts.socket.port}`);
+          await this.secondarySubClient.connect();
+        } catch (secErr) {
+          console.warn('⚠️ [Ticket Service] Could not connect secondary subscriber to Frappe Redis:', secErr.message);
+        }
+      }
     } catch (error) {
       console.error('❌ [Ticket Service] Redis connection failed:', error.message);
       throw error;
@@ -101,6 +130,27 @@ class RedisClient {
         callback(message);
       }
     });
+  }
+
+  async subscribeMulti(channel, callback) {
+    console.log(`[Ticket Service] Subscribing (multi) to channel: ${channel}`);
+    await this.subscribe(channel, callback);
+    if (this.secondarySubClient) {
+      await this.secondarySubClient.subscribe(channel, (message) => {
+        try {
+          const parsedMessage = JSON.parse(message);
+          if (process.env.DEBUG_USER_EVENTS === '1') {
+            console.log('[Ticket Service] (secondary) Message received on', channel, '=>', typeof parsedMessage === 'object' ? Object.keys(parsedMessage) : typeof parsedMessage);
+          }
+          callback(parsedMessage);
+        } catch {
+          if (process.env.DEBUG_USER_EVENTS === '1') {
+            console.log('[Ticket Service] (secondary) Raw message received on', channel);
+          }
+          callback(message);
+        }
+      });
+    }
   }
 
   // Ticket-specific cache methods

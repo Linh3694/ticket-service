@@ -179,7 +179,11 @@ app.use("/api/resource", ticketRoutes);
       const start = Date.now();
       while (true) {
         try {
-          if (redisClient.subClient && redisClient.subClient.isOpen && redisClient.pubClient && redisClient.pubClient.isOpen) {
+          if (
+            redisClient.pubClient && redisClient.pubClient.isOpen &&
+            redisClient.subClient && redisClient.subClient.isOpen &&
+            redisClient.userSubClient && redisClient.userSubClient.isOpen
+          ) {
             return;
           }
         } catch (_) {}
@@ -207,7 +211,9 @@ app.use("/api/resource", ticketRoutes);
       return headers;
     }
     const userChannel = process.env.REDIS_USER_CHANNEL || 'user_events';
-    await redisClient.subscribe(userChannel, async (msg) => {
+    // Subscribe on both primary Redis and optional Frappe Redis (if configured)
+    const subscribeFn = redisClient.subscribeMulti ? redisClient.subscribeMulti.bind(redisClient) : redisClient.subscribe.bind(redisClient);
+    await subscribeFn(userChannel, async (msg) => {
       try {
         const data = typeof msg === 'string' ? JSON.parse(msg) : msg;
         if (!data || !data.type) return;
