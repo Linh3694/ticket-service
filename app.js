@@ -56,7 +56,7 @@ const connectDB = async () => {
 
 // Middleware
 const corsOptions = {
-  origin: process.env.ALLOWED_ORIGINS?.split(',') || ['http://localhost:3000'],
+  origin: process.env.ALLOWED_ORIGINS?.split(',') || ['*'],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
@@ -71,6 +71,16 @@ app.use('/uploads', express.static(uploadPath));
 app.use((req, res, next) => {
   res.setHeader('X-Service', 'ticket-service');
   res.setHeader('X-Service-Version', '1.0.0');
+  next();
+});
+
+// Debug log incoming requests for auth troubleshooting
+app.use((req, res, next) => {
+  try {
+    const auth = req.headers['authorization'];
+    const path = req.originalUrl;
+    console.log(`➡️  [Ticket Service] ${req.method} ${path} auth=${auth ? 'present' : 'missing'}`);
+  } catch (_) {}
   next();
 });
 
