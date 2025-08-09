@@ -330,6 +330,9 @@ app.use("/api/resource", ticketRoutes);
             break;
           }
           default:
+            if (process.env.DEBUG_USER_EVENTS === '1') {
+              console.log('[Ticket Service] Unhandled user event type:', data.type);
+            }
             break;
         }
       } catch (e) {
