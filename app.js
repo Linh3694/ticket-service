@@ -216,8 +216,33 @@ app.use("/api/resource", ticketRoutes);
               department: u.department || '',
               active: u.enabled === 1 || u.active === true,
             };
-            if (Array.isArray(u.roles)) {
-              update.roles = u.roles; // requires schema support
+            // Normalize roles to array of strings
+            try {
+              let rolesRaw = u.roles;
+              if (typeof rolesRaw === 'string') {
+                try {
+                  rolesRaw = JSON.parse(rolesRaw);
+                } catch {
+                  rolesRaw = [];
+                }
+              }
+              if (Array.isArray(rolesRaw)) {
+                const normalized = rolesRaw
+                  .map((item) => {
+                    if (!item) return null;
+                    if (typeof item === 'string') return item;
+                    if (typeof item === 'object') return item.role || item.name || item.value || null;
+                    return null;
+                  })
+                  .filter((v) => typeof v === 'string' && v.trim().length > 0)
+                  .map((v) => v.trim());
+                if (normalized.length > 0) {
+                  // de-duplicate while preserving order
+                  update.roles = Array.from(new Set(normalized));
+                }
+              }
+            } catch (_) {
+              // ignore role normalization errors
             }
             await Users.findOneAndUpdate(
               { email: u.email || u.name },
