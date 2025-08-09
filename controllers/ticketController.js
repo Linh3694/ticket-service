@@ -36,6 +36,21 @@ async function getAdminUsers() {
   }
 }
 
+// Build auth headers for Frappe requests (prefer API key/secret; fallback to FRAPPE_API_TOKEN if provided)
+function buildFrappeHeaders() {
+  const headers = { 'Content-Type': 'application/json', Accept: 'application/json' };
+  if (process.env.FRAPPE_API_KEY && process.env.FRAPPE_API_SECRET) {
+    headers['Authorization'] = `token ${process.env.FRAPPE_API_KEY}:${process.env.FRAPPE_API_SECRET}`;
+    return headers;
+  }
+  if (process.env.FRAPPE_API_TOKEN) {
+    headers['Authorization'] = `Bearer ${process.env.FRAPPE_API_TOKEN}`;
+    headers['X-Frappe-CSRF-Token'] = process.env.FRAPPE_API_TOKEN;
+    return headers;
+  }
+  return headers;
+}
+
 // Helper: fetch Frappe users by Role and ensure they exist in local DB
 async function getUsersByFrappeRole(roleName = 'IT Helpdesk') {
   try {
@@ -46,9 +61,7 @@ async function getUsersByFrappeRole(roleName = 'IT Helpdesk') {
         filters: JSON.stringify([["role","=", roleName]]),
         limit_page_length: 1000,
       },
-      headers: {
-        Authorization: `token ${process.env.FRAPPE_API_KEY || ''}:${process.env.FRAPPE_API_SECRET || ''}`,
-      }
+      headers: buildFrappeHeaders(),
     });
 
     const frappeUserIds = (response.data?.data || []).map(r => r.parent);
@@ -63,8 +76,9 @@ async function getUsersByFrappeRole(roleName = 'IT Helpdesk') {
       // Fetch user details from Frappe
       try {
         const userResp = await axios.get(`${FRAPPE_API_URL}/api/resource/User/${frappeUserId}`, {
-          headers: {
-            Authorization: `token ${process.env.FRAPPE_API_KEY || ''}:${process.env.FRAPPE_API_SECRET || ''}`,
+          headers: buildFrappeHeaders(),
+          params: {
+            fields: JSON.stringify(['name','email','full_name','user_image','enabled','department'])
           }
         });
         const fu = userResp.data?.data;
