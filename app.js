@@ -345,6 +345,17 @@ app.use("/api/resource", ticketRoutes);
         console.warn('⚠️ [Ticket Service] Error handling user event:', e.message);
       }
     });
+
+    // Optional: self-test publish to verify subscription path end-to-end
+    if (process.env.USER_EVENTS_SELF_TEST === '1') {
+      try {
+        const payload = { type: 'user_events_self_test', source: 'ticket-service', ts: new Date().toISOString() };
+        await redisClient.publish(userChannel, payload);
+        console.log('[Ticket Service] Published self-test event to', userChannel);
+      } catch (e) {
+        console.warn('[Ticket Service] Failed to publish self-test event:', e.message);
+      }
+    }
     console.log('✅ [Ticket Service] Services initialized successfully');
   } catch (error) {
     console.error('❌ [Ticket Service] Error initializing services:', error);
