@@ -1,4 +1,6 @@
 const axios = require('axios');
+const mongoose = require('mongoose');
+const User = require('../models/Users');
 
 // Frappe API configuration
 const FRAPPE_API_URL = process.env.FRAPPE_API_URL || 'http://172.16.20.130:8000';
@@ -33,19 +35,32 @@ const authenticate = async (req, res, next) => {
 
       if (userResponse.data && userResponse.data.data) {
         const frappeUser = userResponse.data.data;
-        
-        // Map Frappe user to our format
+
+        // Try to map to local User in MongoDB by email first, then by fullname
+        let localUser = await User.findOne({ email: frappeUser.email });
+        if (!localUser && frappeUser.full_name) {
+          localUser = await User.findOne({ fullname: frappeUser.full_name });
+        }
+
+        if (!localUser) {
+          return res.status(401).json({
+            success: false,
+            message: 'User not provisioned in ticket-service database.'
+          });
+        }
+
+        // Map to our auth user format using local ObjectId
         req.user = {
-          _id: frappeUser.name,
-          fullname: frappeUser.full_name || frappeUser.name,
-          email: frappeUser.email,
-          role: frappeUser.role || 'user',
-          avatarUrl: frappeUser.user_image || '',
-          department: frappeUser.department || '',
-          phone: frappeUser.phone || '',
-          isActive: !frappeUser.disabled
+          _id: localUser._id,
+          fullname: localUser.fullname || frappeUser.full_name || frappeUser.name,
+          email: localUser.email || frappeUser.email,
+          role: localUser.role || frappeUser.role || 'user',
+          avatarUrl: localUser.avatarUrl || frappeUser.user_image || '',
+          department: localUser.department || frappeUser.department || '',
+          phone: localUser.phone || frappeUser.phone || '',
+          isActive: !localUser.disabled
         };
-        
+
         next();
       } else {
         return res.status(401).json({ 

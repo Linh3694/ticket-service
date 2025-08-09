@@ -4,7 +4,8 @@ const path = require('path');
 // Configure storage for ticket attachments
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    cb(null, 'uploads/tickets/');
+    // Match mobile client path expectation: /uploads/Tickets/
+    cb(null, 'uploads/Tickets/');
   },
   filename: (req, file, cb) => {
     const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);

@@ -1,6 +1,7 @@
 const Ticket = require("../models/Ticket");
 const SupportTeam = require("../models/SupportTeam");
-const Chat = require("../models/Chat"); // Thêm import Chat model
+const Chat = require("../models/Chat");
+const User = require("../models/Users");
 const notificationService = require('../services/notificationService'); // Thay thế bằng notificationService
 const mongoose = require("mongoose");
 const axios = require('axios');
@@ -24,34 +25,24 @@ async function getFrappeUser(userId, token) {
   }
 }
 
-// Helper function to find admin users from Frappe
-async function getAdminUsers(token) {
+// Helper function to find admin users from local DB
+async function getAdminUsers() {
   try {
-    const response = await axios.get(`${FRAPPE_API_URL}/api/resource/User?filters=[["role","=","admin"]]`, {
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'X-Frappe-CSRF-Token': token
-      }
-    });
-    return response.data.data || [];
+    const admins = await User.find({ role: "admin" });
+    return admins;
   } catch (error) {
-    console.error('Error getting admin users from Frappe:', error);
+    console.error('Error getting admin users:', error);
     return [];
   }
 }
 
-// Helper function to find technical users from Frappe
-async function getTechnicalUsers(token) {
+// Helper function to find technical users from local DB
+async function getTechnicalUsers() {
   try {
-    const response = await axios.get(`${FRAPPE_API_URL}/api/resource/User?filters=[["role","=","technical"]]`, {
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'X-Frappe-CSRF-Token': token
-      }
-    });
-    return response.data.data || [];
+    const technicals = await User.find({ role: "technical" });
+    return technicals;
   } catch (error) {
-    console.error('Error getting technical users from Frappe:', error);
+    console.error('Error getting technical users:', error);
     return [];
   }
 }
@@ -587,23 +578,10 @@ exports.addSubTask = async (req, res) => {
     // Tìm user theo _id hoặc fullname
     let assignedUser = null;
     if (mongoose.Types.ObjectId.isValid(assignedTo)) {
-      assignedUser = await getFrappeUser(assignedTo, req.headers.authorization?.replace('Bearer ', ''));
+      assignedUser = await User.findById(assignedTo);
     }
     if (!assignedUser) {
-      // Tìm user theo fullname trong Frappe
-      try {
-        const response = await axios.get(`${FRAPPE_API_URL}/api/resource/User?filters=[["full_name","=","${assignedTo}"]]`, {
-          headers: {
-            'Authorization': req.headers.authorization,
-            'X-Frappe-CSRF-Token': req.headers.authorization?.replace('Bearer ', '')
-          }
-        });
-        if (response.data.data && response.data.data.length > 0) {
-          assignedUser = response.data.data[0];
-        }
-      } catch (error) {
-        console.error('Error finding user by fullname:', error);
-      }
+      assignedUser = await User.findOne({ fullname: assignedTo });
     }
     if (!assignedUser) {
       return res.status(400).json({
@@ -928,14 +906,14 @@ async function createTicketHelper({ title, description, creatorId, priority, fil
     ticketCode = `IT-${nextCode}`;
   }
 
-  // 3) Tìm user technical ít ticket nhất
-  const technicalUsers = await getTechnicalUsers(req.headers.authorization?.replace('Bearer ', ''));
+  // 3) Tìm user technical ít ticket nhất (từ DB local)
+  const technicalUsers = await getTechnicalUsers();
   if (!technicalUsers.length) {
     throw new Error("Không có user technical nào để gán!");
   }
   const userTicketCounts = await Promise.all(
     technicalUsers.map(async (u) => {
-      const count = await Ticket.countDocuments({ assignedTo: u.name });
+      const count = await Ticket.countDocuments({ assignedTo: u._id });
       return { user: u, count };
     })
   );
@@ -956,13 +934,13 @@ async function createTicketHelper({ title, description, creatorId, priority, fil
     priority,
     creator: creatorId,
     sla: slaPhase1Deadline,
-    assignedTo: leastAssignedUser.name, // Sử dụng user name từ Frappe
+    assignedTo: leastAssignedUser._id,
     attachments,
     status: "Assigned",
     history: [
       {
         timestamp: new Date(),
-        action: ` <strong>[ID: ${creatorId}]</strong> đã tạo ticket và chỉ định cho <strong>${leastAssignedUser.full_name || leastAssignedUser.name}</strong>`,
+        action: ` <strong>[ID: ${creatorId}]</strong> đã tạo ticket và chỉ định cho <strong>${leastAssignedUser.fullname}</strong>`,
         user: creatorId,
       },
     ],
@@ -1032,7 +1010,7 @@ exports.createTicketGroupChat = async (req, res) => {
     }
 
     // Tìm admin ít group chat nhất để chia đều
-    const adminUsers = await getAdminUsers(req.headers.authorization?.replace('Bearer ', ''));
+    const adminUsers = await getAdminUsers();
     let selectedAdmin = null;
     
     if (adminUsers.length > 0) {
@@ -1055,12 +1033,14 @@ exports.createTicketGroupChat = async (req, res) => {
     const participantIds = new Set();
     
     // Luôn thêm creator và assignedTo
-    participantIds.add(ticket.creator.toString());
-    participantIds.add(ticket.assignedTo.toString());
+    participantIds.add(ticket.creator._id.toString());
+    if (ticket.assignedTo) {
+      participantIds.add(ticket.assignedTo._id.toString());
+    }
     
     // Thêm admin nếu có
     if (selectedAdmin) {
-      participantIds.add(selectedAdmin.name);
+      participantIds.add(selectedAdmin._id.toString());
     }
     
     // Chỉ thêm currentUser nếu họ là creator hoặc assignedTo
@@ -1073,7 +1053,7 @@ exports.createTicketGroupChat = async (req, res) => {
     }
     
     // Convert Set back to array of strings (Frappe user names)
-    const participants = Array.from(participantIds);
+    const participants = Array.from(participantIds).map(id => new mongoose.Types.ObjectId(id));
     
     console.log(`📝 Creating group chat participants:`, {
       creator: ticket.creator._id,
@@ -1092,7 +1072,7 @@ exports.createTicketGroupChat = async (req, res) => {
       isGroup: true,
       avatar: "ticket-icon.svg",
       creator: userId,
-      admins: [selectedAdmin ? selectedAdmin._id : ticket.assignedTo._id],
+      admins: [selectedAdmin ? selectedAdmin._id : (ticket.assignedTo ? ticket.assignedTo._id : userId)],
       participants: participants,
       settings: {
         allowMembersToAdd: false,
