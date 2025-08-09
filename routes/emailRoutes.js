@@ -9,4 +9,7 @@ router.post("/send-update", emailController.sendTicketStatusEmail);
 // Đọc mail -> Tạo ticket
 router.get("/fetch-emails", emailController.fetchEmailsAndCreateTickets);
 
+// Debug: liệt kê 10 email gần nhất trong inbox
+router.get("/peek-inbox", emailController.peekInbox);
+
 module.exports = router;
