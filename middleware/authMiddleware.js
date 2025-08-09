@@ -3,7 +3,7 @@ const mongoose = require('mongoose');
 const User = require('../models/Users');
 
 // Frappe API configuration
-const FRAPPE_API_URL = process.env.FRAPPE_API_URL || 'http://172.16.20.130:8000';
+const FRAPPE_API_URL = process.env.FRAPPE_API_URL || 'https://admin.sis.wellspring.edu.vn';
 
 // Try validating token via custom ERP endpoint first, then fallback to Frappe default
 async function resolveFrappeUserByToken(token) {
@@ -85,11 +85,29 @@ const authenticate = async (req, res, next) => {
       localUser = await User.findOne({ fullname: frappeUser.full_name || frappeUser.fullname });
     }
 
+    // Auto-provision user in local DB if not exists
     if (!localUser) {
-      return res.status(401).json({
-        success: false,
-        message: 'User not provisioned in ticket-service database.'
-      });
+      try {
+        localUser = await User.create({
+          email: frappeUser.email,
+          fullname: frappeUser.full_name || frappeUser.fullname || frappeUser.name,
+          role: frappeUser.role || 'user',
+          avatarUrl: frappeUser.user_image || '',
+          department: frappeUser.department || '',
+          provider: 'frappe',
+          active: true,
+          disabled: false,
+        });
+      } catch (provErr) {
+        // Handle race condition for unique indexes
+        localUser = await User.findOne({ email: frappeUser.email });
+        if (!localUser) {
+          return res.status(401).json({
+            success: false,
+            message: 'User not provisioned in ticket-service database.'
+          });
+        }
+      }
     }
 
     // Map to our auth user format using local ObjectId
