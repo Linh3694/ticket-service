@@ -174,6 +174,21 @@ app.use("/api/resource", ticketRoutes);
 
     // Subscribe to user/role events via Redis
     const redisClient = require('./config/redis');
+    const axios = require('axios');
+    const FRAPPE_API_URL = process.env.FRAPPE_API_URL || 'https://admin.sis.wellspring.edu.vn';
+    function buildFrappeHeaders() {
+      const headers = { 'Content-Type': 'application/json', Accept: 'application/json' };
+      if (process.env.FRAPPE_API_KEY && process.env.FRAPPE_API_SECRET) {
+        headers['Authorization'] = `token ${process.env.FRAPPE_API_KEY}:${process.env.FRAPPE_API_SECRET}`;
+        return headers;
+      }
+      if (process.env.FRAPPE_API_TOKEN) {
+        headers['Authorization'] = `Bearer ${process.env.FRAPPE_API_TOKEN}`;
+        headers['X-Frappe-CSRF-Token'] = process.env.FRAPPE_API_TOKEN;
+        return headers;
+      }
+      return headers;
+    }
     const userChannel = process.env.REDIS_USER_CHANNEL || 'user_events';
     await redisClient.subscribe(userChannel, async (msg) => {
       try {
@@ -184,6 +199,14 @@ app.use("/api/resource", ticketRoutes);
           case 'user_created':
           case 'user_updated': {
             const u = data.user || data.data || {};
+            // If only name provided, try fetch from Frappe to get email
+            if (!u.email && (u.name || data.user_id)) {
+              const userId = u.name || data.user_id;
+              try {
+                const resp = await axios.get(`${FRAPPE_API_URL}/api/resource/User/${userId}`, { headers: buildFrappeHeaders(), params: { fields: JSON.stringify(['name','email','full_name','user_image','enabled','department']) } });
+                Object.assign(u, resp.data?.data || {});
+              } catch {}
+            }
             if (!u.email && !u.name) return;
             // Upsert user + roles[]
             const update = {
@@ -197,10 +220,42 @@ app.use("/api/resource", ticketRoutes);
               update.roles = u.roles; // requires schema support
             }
             await Users.findOneAndUpdate(
-              { email: u.email },
+              { email: u.email || u.name },
               { $set: update },
               { upsert: true, new: true }
             );
+            break;
+          }
+          case 'frappe_doc_event': {
+            // Generic ERP doc event adapter
+            const { doctype, event, doc } = data;
+            if (doctype === 'User' && doc) {
+              const email = doc.email || doc.name;
+              if (!email) break;
+              await Users.findOneAndUpdate(
+                { email },
+                {
+                  $set: {
+                    email,
+                    fullname: doc.full_name || doc.name,
+                    avatarUrl: doc.user_image || '',
+                    department: doc.department || '',
+                    active: doc.enabled === 1,
+                  },
+                },
+                { upsert: true, new: true }
+              );
+            }
+            if (doctype === 'Has Role' && doc) {
+              const email = doc.parent; // in Frappe, parent of Has Role is User.name (often email)
+              const role = doc.role;
+              if (!email || !role) break;
+              if (event === 'after_insert' || event === 'on_update' || data.action === 'assigned') {
+                await Users.updateOne({ email }, { $addToSet: { roles: role } });
+              } else if (event === 'on_trash' || data.action === 'removed' || data.deleted === true) {
+                await Users.updateOne({ email }, { $pull: { roles: role } });
+              }
+            }
             break;
           }
           case 'user_role_assigned': {
