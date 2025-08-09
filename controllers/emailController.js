@@ -9,15 +9,34 @@ const axios = require('axios');
 // Frappe API configuration
 const FRAPPE_API_URL = process.env.FRAPPE_API_URL || 'https://admin.sis.wellspring.edu.vn';
 
+// Build auth headers for Frappe requests (prefer API key/secret)
+function buildFrappeHeaders() {
+  const headers = { 'Content-Type': 'application/json', Accept: 'application/json' };
+  if (process.env.FRAPPE_API_KEY && process.env.FRAPPE_API_SECRET) {
+    headers['Authorization'] = `token ${process.env.FRAPPE_API_KEY}:${process.env.FRAPPE_API_SECRET}`;
+    return headers;
+  }
+  if (process.env.FRAPPE_API_TOKEN) {
+    headers['Authorization'] = `Bearer ${process.env.FRAPPE_API_TOKEN}`;
+    headers['X-Frappe-CSRF-Token'] = process.env.FRAPPE_API_TOKEN;
+    return headers;
+  }
+  return headers;
+}
+
 // Helper function to get user from Frappe
-async function getFrappeUserByEmail(email, token) {
+async function getFrappeUserByEmail(email) {
   try {
-    const response = await axios.get(`${FRAPPE_API_URL}/api/resource/User?filters=[["email","=","${email}"]]`, {
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'X-Frappe-CSRF-Token': token
+    const response = await axios.get(
+      `${FRAPPE_API_URL}/api/resource/User`,
+      {
+        params: {
+          filters: JSON.stringify([["email","=", email]]),
+          fields: JSON.stringify(['name','email','full_name','user_image','enabled','department'])
+        },
+        headers: buildFrappeHeaders()
       }
-    });
+    );
     return response.data.data && response.data.data.length > 0 ? response.data.data[0] : null;
   } catch (error) {
     console.error('Error getting user from Frappe by email:', error);
@@ -139,113 +158,96 @@ exports.sendTicketStatusEmail = async (req, res) => {
   }
 };
 
-// B) Hàm đọc email từ inbox và tạo ticket (dùng Microsoft Graph API)
+// Core inbox processor (reusable for route and background job)
+async function processInboxOnce() {
+  if (!credential || !graphClient) {
+    console.warn('[Ticket Service] Graph client not initialized - skip email polling');
+    return { success: false, reason: 'graph_not_initialized', created: 0, skipped: 0 };
+  }
+
+  const userEmail = process.env.EMAIL_USER;
+  const messages = await graphClient
+    .api(`/users/${userEmail}/mailFolders/Inbox/messages`)
+    .filter('isRead eq false')
+    .select('subject,from,body,hasAttachments')
+    .expand('attachments')
+    .top(50)
+    .get();
+
+  const list = messages.value || [];
+  if (!list.length) {
+    return { success: true, created: 0, skipped: 0 };
+  }
+
+  console.log(`[Ticket Service] Tìm thấy ${list.length} email chưa đọc`);
+
+  let created = 0;
+  let skipped = 0;
+
+  for (const msg of list) {
+    try {
+      const subject = msg.subject || 'Email Support';
+      const from = msg.from?.emailAddress?.address || '';
+      const content = msg.body?.content || '';
+      const lowerSubject = subject.trim().toLowerCase();
+      if (lowerSubject.startsWith('re:') || lowerSubject.startsWith('trả lời:')) {
+        await graphClient.api(`/users/${userEmail}/messages/${msg.id}`).update({ isRead: true });
+        skipped++; continue;
+      }
+
+      // Only accept internal domain
+      if (!from.endsWith('@wellspring.edu.vn')) {
+        await graphClient.api(`/users/${userEmail}/messages/${msg.id}`).update({ isRead: true });
+        skipped++; continue;
+      }
+
+      const plainContent = convert(content, { wordwrap: 130 });
+
+      // Find creator in Frappe (via API Key/Secret or token)
+      const creatorUser = await getFrappeUserByEmail(from);
+      if (!creatorUser) {
+        console.warn(`[Ticket Service] Không tìm thấy user Frappe cho ${from}, đánh dấu đã đọc và bỏ qua`);
+        await graphClient.api(`/users/${userEmail}/messages/${msg.id}`).update({ isRead: true });
+        skipped++; continue;
+      }
+
+      let attachments = [];
+      if (msg.hasAttachments && msg.attachments?.value?.length) {
+        attachments = msg.attachments.value
+          .filter(att => att['@odata.type'] === '#microsoft.graph.fileAttachment')
+          .map(att => ({ filename: att.name, url: `data:${att.contentType};base64,${att.contentBytes}` }));
+      }
+
+      await ticketController.createTicketHelper({
+        title: subject,
+        description: plainContent,
+        creatorId: creatorUser.name,
+        priority: 'Medium',
+        files: attachments,
+      });
+
+      await graphClient.api(`/users/${userEmail}/messages/${msg.id}`).update({ isRead: true });
+      created++;
+    } catch (e) {
+      console.error('[Ticket Service] Error processing email:', e.message);
+      // do not mark as read so it can be retried next run
+    }
+  }
+
+  return { success: true, created, skipped };
+}
+
+// B) Route wrapper to process inbox on demand
 exports.fetchEmailsAndCreateTickets = async (req, res) => {
   try {
-    if (!credential || !graphClient) {
-      return res.status(500).json({ 
-        success: false, 
-        message: "Azure Graph client not initialized. Please check Azure credentials." 
-      });
-    }
-
-    // Sử dụng /users/{EMAIL_USER} thay vì /me
-    const userEmail = process.env.EMAIL_USER;
-    const messages = await graphClient
-      .api(`/users/${userEmail}/mailFolders/Inbox/messages`)
-      .filter("isRead eq false") // Tương đương với UNSEEN trong IMAP
-      .select("subject,from,body") // Lấy các trường cần thiết
-      .expand("attachments")
-      .top(50)
-      .get();
-    // Nếu không có email mới, trả về ngay
-        if (!messages.value || messages.value.length === 0) {
-        return;
-        }
-    console.log(`Tìm thấy ${messages.value.length} email chưa đọc`);
-
-    for (let msg of messages.value) {
-      const subject = msg.subject || "Email Support";
-      const from = msg.from?.emailAddress?.address || "";
-      const content = msg.body?.content || "";
-      const lowerSubject = subject.trim().toLowerCase();
-      if (lowerSubject.startsWith("re:") || lowerSubject.startsWith("trả lời:")) {
-        console.log(`Bỏ qua email có subject: ${subject}`);
-         await graphClient
-          .api(`/users/${userEmail}/messages/${msg.id}`)
-          .update({ isRead: true });
-        continue;
-        }
- 
-      const plainContent = convert(content, { wordwrap: 130 }); // Updated to use html-to-text
-
-      // Kiểm tra domain của người gửi
-      if (!from.endsWith("@wellspring.edu.vn")) {
-        console.log(`Bỏ qua email từ ${from} vì không thuộc domain @wellspring.edu.vn`);
-        // Đánh dấu email là đã đọc để không xử lý lại
-        await graphClient
-          .api(`/users/${userEmail}/messages/${msg.id}`)
-          .update({ isRead: true });
-        console.log(`Đã đánh dấu email ${msg.id} là đã đọc (bỏ qua)`);
-        continue; // Bỏ qua email này
-      }
-
-      console.log("Đang xử lý email từ:", from, "với tiêu đề:", subject);
-            let attachments = [];
-            if (msg.hasAttachments && msg.attachments && msg.attachments.value && msg.attachments.value.length > 0) {
-                attachments = msg.attachments.value
-                .filter(att => att["@odata.type"] === "#microsoft.graph.fileAttachment")
-                .map(att => ({
-                    filename: att.name,
-                    url: `data:${att.contentType};base64,${att.contentBytes}`
-                }));
-            }
-
-      // Tìm user dựa trên email người gửi
-      let creatorUser = await getFrappeUserByEmail(from, process.env.FRAPPE_API_TOKEN);
-
-      // Nếu không tìm thấy user, tạo user tạm thời
-      if (!creatorUser) {
-        console.log(`Không tìm thấy user với email ${from}, tạo user tạm thời...`);
-        // In this case, we cannot create a user in Frappe directly from here.
-        // We would need to handle this case by returning an error or skipping the ticket creation.
-        // For now, we'll just log and continue.
-        console.log(`Không thể tạo user tạm thời với email ${from} trong Frappe.`);
-        await graphClient
-          .api(`/users/${userEmail}/messages/${msg.id}`)
-          .update({ isRead: true });
-        console.log(`Đã đánh dấu email ${msg.id} là đã đọc (bỏ qua)`);
-        continue; // Bỏ qua email này
-      }
-
-        const newTicket = await ticketController.createTicketHelper({
-            title: subject,
-            description: plainContent,
-            creatorId: creatorUser.name, // Sử dụng user name từ Frappe
-            priority: "Medium",
-            files: attachments,  // Email ko có file attach tạm
-        });
-
-
-      // Đánh dấu email là đã đọc
-      await graphClient
-        .api(`/users/${userEmail}/messages/${msg.id}`)
-        .update({ isRead: true });
-      console.log(`Đã đánh dấu email ${msg.id} là đã đọc`);
-    }
-
-    return res.status(200).json({ success: true, message: "Đã xử lý email và tạo ticket." });
+    const result = await processInboxOnce();
+    const status = result.success ? 200 : 500;
+    return res.status(status).json({ success: result.success, ...result });
   } catch (error) {
-    console.error("Lỗi khi fetch email:", error);
+    console.error('Lỗi khi fetch email:', error);
     return res.status(500).json({ success: false, message: error.message });
   }
 };
 
 // C) Hàm chạy định kỳ (dùng với cron job nếu cần)
-exports.runEmailSync = async () => {
-  try {
-    await exports.fetchEmailsAndCreateTickets({}); // Gọi hàm fetch mà không cần req/res
-  } catch (error) {
-    console.error("Lỗi đồng bộ email:", error);
-  }
-};
+exports.processInboxOnce = processInboxOnce;
