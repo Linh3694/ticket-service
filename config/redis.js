@@ -10,23 +10,37 @@ class RedisClient {
 
   async connect() {
     try {
-      this.client = createClient({
-        socket: {
-          host: process.env.REDIS_HOST,
-          port: process.env.REDIS_PORT,
-        },
-        password: process.env.REDIS_PASSWORD,
-      });
+      const url = process.env.REDIS_URL;
+      const host = process.env.REDIS_HOST || '127.0.0.1';
+      const port = process.env.REDIS_PORT ? Number(process.env.REDIS_PORT) : 6379;
+      const password = process.env.REDIS_PASSWORD || undefined;
 
-      this.pubClient = createClient({
-        socket: {
-          host: process.env.REDIS_HOST,
-          port: process.env.REDIS_PORT,
-        },
-        password: process.env.REDIS_PASSWORD,
-      });
+      const baseOpts = url
+        ? { url }
+        : {
+            socket: {
+              host,
+              port,
+            },
+            password,
+          };
 
+      this.client = createClient(baseOpts);
+      this.pubClient = createClient(baseOpts);
       this.subClient = this.pubClient.duplicate();
+
+      // Basic diagnostics
+      const target = url ? url : `${host}:${port}`;
+      console.log(`[Ticket Service] Connecting to Redis at ${target}`);
+      if (password) console.log('[Ticket Service] Redis password: set');
+
+      this.client.on('error', (err) => console.error('[Ticket Service] Redis client error:', err.message));
+      this.pubClient.on('error', (err) => console.error('[Ticket Service] Redis pub error:', err.message));
+      this.subClient.on('error', (err) => console.error('[Ticket Service] Redis sub error:', err.message));
+
+      this.client.on('ready', () => console.log('[Ticket Service] Redis client ready'));
+      this.pubClient.on('ready', () => console.log('[Ticket Service] Redis pub ready'));
+      this.subClient.on('ready', () => console.log('[Ticket Service] Redis sub ready'));
 
       await this.client.connect();
       await this.pubClient.connect();
@@ -67,11 +81,18 @@ class RedisClient {
   }
 
   async subscribe(channel, callback) {
+    console.log(`[Ticket Service] Subscribing to channel: ${channel}`);
     await this.subClient.subscribe(channel, (message) => {
       try {
         const parsedMessage = JSON.parse(message);
+        if (process.env.DEBUG_USER_EVENTS === '1') {
+          console.log('[Ticket Service] Message received on', channel, '=>', typeof parsedMessage === 'object' ? Object.keys(parsedMessage) : typeof parsedMessage);
+        }
         callback(parsedMessage);
       } catch {
+        if (process.env.DEBUG_USER_EVENTS === '1') {
+          console.log('[Ticket Service] Raw message received on', channel);
+        }
         callback(message);
       }
     });
