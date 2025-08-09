@@ -275,5 +275,35 @@ exports.fetchEmailsAndCreateTickets = async (req, res) => {
   }
 };
 
+// B2) Peek inbox (debug: liệt kê nhanh 10 email gần nhất)
+exports.peekInbox = async (req, res) => {
+  try {
+    if (!credential || !graphClient) {
+      return res.status(500).json({ success: false, reason: 'graph_not_initialized' });
+    }
+
+    const userEmail = process.env.EMAIL_USER;
+    const messages = await graphClient
+      .api(`/users/${userEmail}/mailFolders/Inbox/messages`)
+      .select('id,subject,from,isRead,receivedDateTime')
+      .top(10)
+      .orderby('receivedDateTime desc')
+      .get();
+
+    const list = (messages.value || []).map(m => ({
+      id: m.id,
+      subject: m.subject,
+      from: m.from?.emailAddress?.address,
+      isRead: m.isRead,
+      received: m.receivedDateTime
+    }));
+
+    return res.status(200).json({ success: true, email: userEmail, count: list.length, list });
+  } catch (error) {
+    console.error('Lỗi khi peek inbox:', error);
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
 // C) Hàm chạy định kỳ (dùng với cron job nếu cần)
 exports.processInboxOnce = processInboxOnce;
