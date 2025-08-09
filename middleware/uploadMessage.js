@@ -4,7 +4,8 @@ const path = require('path');
 // Configure storage for message files
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    cb(null, 'uploads/messages/');
+    // Match mobile client path expectation for message images
+    cb(null, 'uploads/Messages/');
   },
   filename: (req, file, cb) => {
     const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);

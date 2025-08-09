@@ -28,6 +28,9 @@ const io = new Server(server, {
   },
 });
 
+// Make io accessible in controllers via req.app.get('io')
+app.set('io', io);
+
 // Setup Redis adapter
 (async () => {
   try {
@@ -145,6 +148,8 @@ const chatService = require('./services/chatService');
 
 // Use routes
 app.use("/api/ticket", ticketRoutes);
+// Backward-compatible alias for clients using plural path
+app.use("/api/tickets", ticketRoutes);
 app.use("/api/email", emailRoutes);
 
 // Frappe compatible routes
