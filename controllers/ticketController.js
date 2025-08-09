@@ -7,7 +7,7 @@ const mongoose = require("mongoose");
 const axios = require('axios');
 
 // Frappe API configuration
-const FRAPPE_API_URL = process.env.FRAPPE_API_URL || 'http://172.16.20.130:8000';
+const FRAPPE_API_URL = process.env.FRAPPE_API_URL || 'https://admin.sis.wellspring.edu.vn';
 
 // Helper function to get user from Frappe
 async function getFrappeUser(userId, token) {
