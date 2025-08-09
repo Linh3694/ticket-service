@@ -5,7 +5,8 @@ class RedisClient {
   constructor() {
     this.client = null;
     this.pubClient = null;
-    this.subClient = null;
+    this.subClient = null; // for socket.io adapter
+    this.userSubClient = null; // dedicated subscriber for business channels
   }
 
   async connect() {
@@ -28,6 +29,7 @@ class RedisClient {
       this.client = createClient(baseOpts);
       this.pubClient = createClient(baseOpts);
       this.subClient = this.pubClient.duplicate();
+      this.userSubClient = createClient(baseOpts);
 
       // Basic diagnostics
       const target = url ? url : `${host}:${port}`;
@@ -37,14 +39,17 @@ class RedisClient {
       this.client.on('error', (err) => console.error('[Ticket Service] Redis client error:', err.message));
       this.pubClient.on('error', (err) => console.error('[Ticket Service] Redis pub error:', err.message));
       this.subClient.on('error', (err) => console.error('[Ticket Service] Redis sub error:', err.message));
+      this.userSubClient.on('error', (err) => console.error('[Ticket Service] Redis user-sub error:', err.message));
 
       this.client.on('ready', () => console.log('[Ticket Service] Redis client ready'));
       this.pubClient.on('ready', () => console.log('[Ticket Service] Redis pub ready'));
       this.subClient.on('ready', () => console.log('[Ticket Service] Redis sub ready'));
+      this.userSubClient.on('ready', () => console.log('[Ticket Service] Redis user-sub ready'));
 
       await this.client.connect();
       await this.pubClient.connect();
       await this.subClient.connect();
+      await this.userSubClient.connect();
 
       console.log('✅ [Ticket Service] Redis connected successfully');
     } catch (error) {
@@ -82,7 +87,7 @@ class RedisClient {
 
   async subscribe(channel, callback) {
     console.log(`[Ticket Service] Subscribing to channel: ${channel}`);
-    await this.subClient.subscribe(channel, (message) => {
+    await this.userSubClient.subscribe(channel, (message) => {
       try {
         const parsedMessage = JSON.parse(message);
         if (process.env.DEBUG_USER_EVENTS === '1') {
