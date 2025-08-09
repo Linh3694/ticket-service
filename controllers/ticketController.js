@@ -36,13 +36,66 @@ async function getAdminUsers() {
   }
 }
 
-// Helper function to find technical users from local DB
-async function getTechnicalUsers() {
+// Helper: fetch Frappe users by Role and ensure they exist in local DB
+async function getUsersByFrappeRole(roleName = 'IT Helpdesk') {
   try {
-    const technicals = await User.find({ role: "technical" });
-    return technicals;
+    // Call Frappe to get all users having the role
+    const response = await axios.get(`${FRAPPE_API_URL}/api/resource/Has Role`, {
+      params: {
+        fields: JSON.stringify(['parent']),
+        filters: JSON.stringify([["role","=", roleName]]),
+        limit_page_length: 1000,
+      },
+      headers: {
+        Authorization: `token ${process.env.FRAPPE_API_KEY || ''}:${process.env.FRAPPE_API_SECRET || ''}`,
+      }
+    });
+
+    const frappeUserIds = (response.data?.data || []).map(r => r.parent);
+    if (frappeUserIds.length === 0) return [];
+
+    // Ensure local users exist for these Frappe users
+    const users = await User.find({ email: { $exists: true } });
+    const existingEmails = new Set(users.map(u => u.email));
+
+    const createdLocals = [];
+    for (const frappeUserId of frappeUserIds) {
+      // Fetch user details from Frappe
+      try {
+        const userResp = await axios.get(`${FRAPPE_API_URL}/api/resource/User/${frappeUserId}`, {
+          headers: {
+            Authorization: `token ${process.env.FRAPPE_API_KEY || ''}:${process.env.FRAPPE_API_SECRET || ''}`,
+          }
+        });
+        const fu = userResp.data?.data;
+        if (!fu) continue;
+
+        // Upsert local user by email
+        const local = await User.findOneAndUpdate(
+          { email: fu.email },
+          {
+            email: fu.email,
+            fullname: fu.full_name || fu.name,
+            avatarUrl: fu.user_image || '',
+            department: fu.department || '',
+            role: 'technical',
+            provider: 'frappe',
+            active: fu.enabled === 1,
+            disabled: fu.enabled !== 1,
+          },
+          { new: true, upsert: true }
+        );
+        createdLocals.push(local);
+      } catch (e) {
+        console.warn('Failed to sync Frappe user', frappeUserId, e.message);
+      }
+    }
+
+    // Return only locals synced from Frappe role. No fallback to local roles.
+    return createdLocals;
   } catch (error) {
-    console.error('Error getting technical users:', error);
+    console.error('Error getting users by Frappe role:', error.message);
+    // Do not fallback to local roles. Return empty to surface configuration issue.
     return [];
   }
 }
@@ -907,9 +960,10 @@ async function createTicketHelper({ title, description, creatorId, priority, fil
   }
 
   // 3) Tìm user technical ít ticket nhất (từ DB local)
-  const technicalUsers = await getTechnicalUsers();
+  // Prefer Frappe role 'IT Helpdesk' to decide assignee list
+  const technicalUsers = await getUsersByFrappeRole('IT Helpdesk');
   if (!technicalUsers.length) {
-    throw new Error("Không có user technical nào để gán!");
+    throw new Error("Không tìm thấy user có Frappe Role 'IT Helpdesk' để gán!");
   }
   const userTicketCounts = await Promise.all(
     technicalUsers.map(async (u) => {
