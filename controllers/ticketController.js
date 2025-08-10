@@ -938,7 +938,10 @@ exports.getTicketGroupChat = async (req, res) => {
     const CHAT_BASE = process.env.CHAT_SERVICE_URL || process.env.CHAT_SERVICE_PUBLIC_URL || FRAPPE_API_URL;
     try {
       const chatResp = await axios.get(`${CHAT_BASE}/api/chats/${ticket.groupChatId}`, {
-        headers: { Authorization: req.headers['authorization'] || '' }
+        headers: {
+          Authorization: req.headers['authorization'] || '',
+          'X-Service-Token': process.env.CHAT_INTERNAL_TOKEN || process.env.INTERNAL_SERVICE_TOKEN || ''
+        }
       });
       const groupChat = chatResp.data;
 
@@ -959,7 +962,10 @@ exports.getTicketGroupChat = async (req, res) => {
             });
             // Refetch as participant
             const refetch = await axios.get(`${CHAT_BASE}/api/chats/${ticket.groupChatId}`, {
-              headers: { Authorization: req.headers['authorization'] || '' }
+              headers: {
+                Authorization: req.headers['authorization'] || '',
+                'X-Service-Token': process.env.CHAT_INTERNAL_TOKEN || process.env.INTERNAL_SERVICE_TOKEN || ''
+              }
             });
             const joinedChat = refetch.data;
             return res.status(200).json({
@@ -1002,7 +1008,10 @@ exports.getTicketGroupChat = async (req, res) => {
               }
             });
             const refetch = await axios.get(`${CHAT_BASE}/api/chats/${ticket.groupChatId}`, {
-              headers: { Authorization: req.headers['authorization'] || '' }
+              headers: {
+                Authorization: req.headers['authorization'] || '',
+                'X-Service-Token': process.env.CHAT_INTERNAL_TOKEN || process.env.INTERNAL_SERVICE_TOKEN || ''
+              }
             });
             const joinedChat = refetch.data;
             return res.status(200).json({ success: true, hasGroup: true, groupChat: joinedChat, isParticipant: true, canJoin: true });
