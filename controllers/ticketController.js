@@ -935,7 +935,7 @@ exports.getTicketGroupChat = async (req, res) => {
     }
 
     // Gọi chat-service để lấy chi tiết group chat
-    const CHAT_BASE = process.env.CHAT_SERVICE_PUBLIC_URL || FRAPPE_API_URL;
+    const CHAT_BASE = process.env.CHAT_SERVICE_URL || process.env.CHAT_SERVICE_PUBLIC_URL || FRAPPE_API_URL;
     try {
       const chatResp = await axios.get(`${CHAT_BASE}/api/chats/${ticket.groupChatId}`, {
         headers: { Authorization: req.headers['authorization'] || '' }
@@ -1252,7 +1252,7 @@ exports.createTicketGroupChat = async (req, res) => {
     });
     
     // Tạo group chat qua chat-service
-    const CHAT_BASE = process.env.CHAT_SERVICE_PUBLIC_URL || FRAPPE_API_URL;
+    const CHAT_BASE = process.env.CHAT_SERVICE_URL || process.env.CHAT_SERVICE_PUBLIC_URL || FRAPPE_API_URL;
     const createResp = await axios.post(`${CHAT_BASE}/api/chats/group`, {
       name: `Ticket: ${ticket.ticketCode}`,
       description: `Group chat tự động cho ticket ${ticket.ticketCode}`,
@@ -1335,7 +1335,7 @@ exports.joinTicketGroupChat = async (req, res) => {
       return res.status(404).json({ success: false, message: "Ticket chưa có group chat" });
     }
 
-    const CHAT_BASE = process.env.CHAT_SERVICE_PUBLIC_URL || FRAPPE_API_URL;
+    const CHAT_BASE = process.env.CHAT_SERVICE_URL || process.env.CHAT_SERVICE_PUBLIC_URL || FRAPPE_API_URL;
     // Kiểm tra đã là participant?
     try {
       const current = await axios.get(`${CHAT_BASE}/api/chats/${ticket.groupChatId}`, { headers: { Authorization: req.headers['authorization'] || '' } });
