@@ -325,7 +325,7 @@ exports.updateTicket = async (req, res) => {
       ticket.history.push({
         timestamp: new Date(),
         action: `<strong>${req.user.fullname}</strong> đã thay đổi trạng thái ticket từ <strong>"${translateStatus(ticket.status)}"</strong> sang <strong>"${translateStatus(updates.status)}"</strong>`,
-        user: req.user._id,
+        user: req.user._id, // luôn là ObjectId từ middleware
       });
     }
 
@@ -1066,8 +1066,8 @@ async function createTicketHelper({ title, description, creatorId, fallbackCreat
     history: [
       {
         timestamp: new Date(),
-        action: ` <strong>[ID: ${creatorId}]</strong> đã tạo ticket và chỉ định cho <strong>${leastAssignedUser.fullname}</strong>`,
-        user: creatorId,
+        action: ` <strong>${(await (async()=>{try{const u=await User.findById(creatorObjectId).lean();return u?.fullname||u?.email||creatorId;}catch(_){return creatorId;}})())}</strong> đã tạo ticket và chỉ định cho <strong>${leastAssignedUser.fullname}</strong>`,
+        user: creatorObjectId,
       },
     ],
   });
