@@ -10,6 +10,7 @@ router.post("/", authenticate, upload.array("attachments", 15), ticketController
 router.get("/technical-stats/:userId", ticketController.getTechnicalStats);
 router.get("/support-team", ticketController.getSupportTeam);
 router.get("/", authenticate, ticketController.getTickets);
+router.get("/me", authenticate, ticketController.getMe);
 router.get("/:ticketId", authenticate, ticketController.getTicketById);
 router.get("/:ticketId/group-chat", authenticate, ticketController.getTicketGroupChat);
 router.post("/:ticketId/group-chat", authenticate, ticketController.createTicketGroupChat);
