@@ -947,6 +947,32 @@ exports.getTicketGroupChat = async (req, res) => {
         && groupChat.participants.some((p) => (p._id || p).toString() === userId.toString());
 
       if (!isParticipant && req.user.role !== "admin" && req.user.role !== "superadmin") {
+        // Thử auto-join nếu là creator/assigned
+        const isCreatorOrAssigned = ticket.creator.equals(userId) || (ticket.assignedTo && ticket.assignedTo.equals(userId));
+        if (isCreatorOrAssigned) {
+          try {
+            await axios.post(`${CHAT_BASE}/api/chats/${ticket.groupChatId}/add-user`, { user_id: userId }, {
+              headers: {
+                Authorization: req.headers['authorization'] || '',
+                'X-Service-Token': process.env.CHAT_INTERNAL_TOKEN || process.env.INTERNAL_SERVICE_TOKEN || ''
+              }
+            });
+            // Refetch as participant
+            const refetch = await axios.get(`${CHAT_BASE}/api/chats/${ticket.groupChatId}`, {
+              headers: { Authorization: req.headers['authorization'] || '' }
+            });
+            const joinedChat = refetch.data;
+            return res.status(200).json({
+              success: true,
+              hasGroup: true,
+              groupChat: joinedChat,
+              isParticipant: true,
+              canJoin: true,
+            });
+          } catch (_) {
+            // fallthrough to 403 below
+          }
+        }
         return res.status(403).json({ success: false, message: "Bạn không có quyền truy cập group chat này" });
       }
 
@@ -963,6 +989,25 @@ exports.getTicketGroupChat = async (req, res) => {
         console.log(`⚠️ Ticket ${ticket.ticketCode} có groupChatId nhưng chat không tồn tại ở chat-service, đang cleanup`);
         await Ticket.findByIdAndUpdate(ticketId, { $unset: { groupChatId: 1 } });
         return res.status(404).json({ success: false, message: "Group chat không tồn tại" });
+      }
+      // Nếu 403, thử auto-join (khi user là creator/assigned) rồi trả lại
+      if (e.response?.status === 403) {
+        const isCreatorOrAssigned = ticket.creator.equals(userId) || (ticket.assignedTo && ticket.assignedTo.equals(userId));
+        if (isCreatorOrAssigned) {
+          try {
+            await axios.post(`${CHAT_BASE}/api/chats/${ticket.groupChatId}/add-user`, { user_id: userId }, {
+              headers: {
+                Authorization: req.headers['authorization'] || '',
+                'X-Service-Token': process.env.CHAT_INTERNAL_TOKEN || process.env.INTERNAL_SERVICE_TOKEN || ''
+              }
+            });
+            const refetch = await axios.get(`${CHAT_BASE}/api/chats/${ticket.groupChatId}`, {
+              headers: { Authorization: req.headers['authorization'] || '' }
+            });
+            const joinedChat = refetch.data;
+            return res.status(200).json({ success: true, hasGroup: true, groupChat: joinedChat, isParticipant: true, canJoin: true });
+          } catch (_) {}
+        }
       }
       throw e;
     }
@@ -1171,7 +1216,7 @@ exports.createTicketGroupChat = async (req, res) => {
       const CHAT_BASE = process.env.CHAT_SERVICE_PUBLIC_URL || FRAPPE_API_URL;
       try {
         const checkResp = await axios.get(`${CHAT_BASE}/api/chats/${ticket.groupChatId}`, {
-          headers: { Authorization: req.headers['authorization'] || '' }
+          headers: { Authorization: req.headers['authorization'] || '', 'X-Service-Token': process.env.CHAT_INTERNAL_TOKEN || process.env.INTERNAL_SERVICE_TOKEN || '' }
         });
         const existingChat = checkResp.data;
         // Đảm bảo current user trong participants nếu là creator/assignedTo
@@ -1181,7 +1226,7 @@ exports.createTicketGroupChat = async (req, res) => {
           try {
             await axios.post(`${CHAT_BASE}/api/chats/${ticket.groupChatId}/add-user`, { user_id: userId }, { headers: { Authorization: req.headers['authorization'] || '' } });
             // Re-fetch chat
-            const refetch = await axios.get(`${CHAT_BASE}/api/chats/${ticket.groupChatId}`, { headers: { Authorization: req.headers['authorization'] || '' } });
+        const refetch = await axios.get(`${CHAT_BASE}/api/chats/${ticket.groupChatId}`, { headers: { Authorization: req.headers['authorization'] || '', 'X-Service-Token': process.env.CHAT_INTERNAL_TOKEN || process.env.INTERNAL_SERVICE_TOKEN || '' } });
             return res.status(200).json({ success: true, message: 'Group chat đã tồn tại', groupChat: refetch.data });
           } catch (_) {
             // Ignore add failure, still return existing chat
@@ -1258,7 +1303,10 @@ exports.createTicketGroupChat = async (req, res) => {
       description: `Group chat tự động cho ticket ${ticket.ticketCode}`,
       participant_ids: participants.map((p) => p.toString()),
     }, {
-      headers: { Authorization: req.headers['authorization'] || '' }
+      headers: {
+        Authorization: req.headers['authorization'] || '',
+        'X-Service-Token': process.env.CHAT_INTERNAL_TOKEN || process.env.INTERNAL_SERVICE_TOKEN || ''
+      }
     });
 
     const groupChat = createResp.data?.message || createResp.data; // support both shapes
@@ -1289,7 +1337,7 @@ exports.createTicketGroupChat = async (req, res) => {
     await ticket.save();
     
     // Trả về dữ liệu chat từ chat-service
-    const refetch = await axios.get(`${CHAT_BASE}/api/chats/${groupChat._id}`, { headers: { Authorization: req.headers['authorization'] || '' } });
+    const refetch = await axios.get(`${CHAT_BASE}/api/chats/${groupChat._id}`, { headers: { Authorization: req.headers['authorization'] || '', 'X-Service-Token': process.env.CHAT_INTERNAL_TOKEN || process.env.INTERNAL_SERVICE_TOKEN || '' } });
     const finalChat = refetch.data || groupChat;
 
     res.status(201).json({
@@ -1338,11 +1386,11 @@ exports.joinTicketGroupChat = async (req, res) => {
     const CHAT_BASE = process.env.CHAT_SERVICE_URL || process.env.CHAT_SERVICE_PUBLIC_URL || FRAPPE_API_URL;
     // Kiểm tra đã là participant?
     try {
-      const current = await axios.get(`${CHAT_BASE}/api/chats/${ticket.groupChatId}`, { headers: { Authorization: req.headers['authorization'] || '' } });
+      const current = await axios.get(`${CHAT_BASE}/api/chats/${ticket.groupChatId}`, { headers: { Authorization: req.headers['authorization'] || '', 'X-Service-Token': process.env.CHAT_INTERNAL_TOKEN || process.env.INTERNAL_SERVICE_TOKEN || '' } });
       const currentChat = current.data;
       const isAlreadyParticipant = Array.isArray(currentChat.participants) && currentChat.participants.some(p => (p._id || p).toString() === userId.toString());
       if (!isAlreadyParticipant) {
-        await axios.post(`${CHAT_BASE}/api/chats/${ticket.groupChatId}/add-user`, { user_id: userId }, { headers: { Authorization: req.headers['authorization'] || '' } });
+            await axios.post(`${CHAT_BASE}/api/chats/${ticket.groupChatId}/add-user`, { user_id: userId }, { headers: { Authorization: req.headers['authorization'] || '', 'X-Service-Token': process.env.CHAT_INTERNAL_TOKEN || process.env.INTERNAL_SERVICE_TOKEN || '' } });
       }
     } catch (e) {
       if (e.response?.status === 404) {
@@ -1360,7 +1408,7 @@ exports.joinTicketGroupChat = async (req, res) => {
     await ticket.save();
 
     // Lấy lại thông tin chat từ chat-service để trả về
-    const updated = await axios.get(`${CHAT_BASE}/api/chats/${ticket.groupChatId}`, { headers: { Authorization: req.headers['authorization'] || '' } });
+    const updated = await axios.get(`${CHAT_BASE}/api/chats/${ticket.groupChatId}`, { headers: { Authorization: req.headers['authorization'] || '', 'X-Service-Token': process.env.CHAT_INTERNAL_TOKEN || process.env.INTERNAL_SERVICE_TOKEN || '' } });
     const updatedGroupChat = updated.data;
 
     res.status(200).json({
