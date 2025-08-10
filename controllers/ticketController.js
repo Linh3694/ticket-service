@@ -188,6 +188,7 @@ exports.createTicket = async (req, res) => {
       description,
       priority,
       creatorId: creator,
+      fallbackCreatorId: req.user?._id,
       bearerToken,
       files: req.files || [],
     });
@@ -961,7 +962,7 @@ exports.debugTicketGroupChat = async (req, res) => {
   }
 };
 
-async function createTicketHelper({ title, description, creatorId, priority, files = [], bearerToken = null }) {
+async function createTicketHelper({ title, description, creatorId, fallbackCreatorId = null, priority, files = [], bearerToken = null }) {
   // 1) Tính SLA Phase 1 (4h, 8:00 - 17:00)
   const phase1Duration = 4;
   const startHour = 8;
@@ -1033,12 +1034,31 @@ async function createTicketHelper({ title, description, creatorId, priority, fil
   }));
 
   // 5) Tạo ticket
+  // Ensure creator is a valid ObjectId string: map from email -> local user if needed
+  let creatorObjectId = creatorId;
+  try {
+    const mongoose = require('mongoose');
+    if (!creatorObjectId || !mongoose.Types.ObjectId.isValid(String(creatorObjectId))) {
+      // Try resolve by email
+      if (creatorId && typeof creatorId === 'string' && creatorId.includes('@')) {
+        const creatorUser = await User.findOne({ email: creatorId });
+        if (creatorUser) {
+          creatorObjectId = creatorUser._id;
+        }
+      }
+      // Fallback to current authenticated user
+      if (!creatorObjectId && fallbackCreatorId) {
+        creatorObjectId = fallbackCreatorId;
+      }
+    }
+  } catch (_) {}
+
   const newTicket = new Ticket({
     ticketCode,
     title,
     description,
     priority,
-    creator: creatorId,
+    creator: creatorObjectId,
     sla: slaPhase1Deadline,
     assignedTo: leastAssignedUser._id,
     attachments,
