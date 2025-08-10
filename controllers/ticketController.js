@@ -878,9 +878,9 @@ exports.getTicketGroupChat = async (req, res) => {
       return res.status(403).json({ success: false, message: "Bạn không có quyền truy cập ticket này" });
     }
 
-    // Lấy group chat
+    // Lấy group chat (nếu chưa có, trả về hasGroup=false để client hiển thị nút tạo)
     if (!ticket.groupChatId) {
-      return res.status(404).json({ success: false, message: "Ticket chưa có group chat" });
+      return res.status(200).json({ success: true, hasGroup: false, canCreate: true, message: "Ticket chưa có group chat" });
     }
 
     const groupChat = await Chat.findById(ticket.groupChatId)
@@ -907,6 +907,7 @@ exports.getTicketGroupChat = async (req, res) => {
     // Trả về group chat với thông tin về việc user có phải participant không
     res.status(200).json({ 
       success: true, 
+      hasGroup: true,
       groupChat,
       isParticipant,
       canJoin: req.user.role === "admin" || req.user.role === "superadmin" || isParticipant
