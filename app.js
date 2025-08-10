@@ -245,8 +245,17 @@ app.use("/api/resource", ticketRoutes);
               fullname: u.full_name || u.fullname || u.name,
               avatarUrl: u.user_image || '',
               department: u.department || '',
-              active: u.enabled === 1 || u.active === true,
             };
+            // Derive active: prefer explicit 'enabled' from Frappe User, fallback to provided 'active', default true
+            try {
+              if (typeof u.enabled !== 'undefined') {
+                update.active = (u.enabled === 1 || u.enabled === true);
+                update.disabled = !update.active;
+              } else if (typeof u.active !== 'undefined') {
+                update.active = !!u.active;
+                update.disabled = !update.active;
+              }
+            } catch (_) {}
             // Normalize roles to array of strings
             try {
               let rolesRaw = u.roles;
@@ -296,7 +305,7 @@ app.use("/api/resource", ticketRoutes);
           case 'frappe_doc_event': {
             // Generic ERP doc event adapter
             const { doctype, event, doc } = data;
-            if (doctype === 'User' && doc) {
+             if (doctype === 'User' && doc) {
               const email = doc.email || doc.name;
               if (!email) break;
               await Users.findOneAndUpdate(
@@ -307,7 +316,8 @@ app.use("/api/resource", ticketRoutes);
                     fullname: doc.full_name || doc.name,
                     avatarUrl: doc.user_image || '',
                     department: doc.department || '',
-                    active: doc.enabled === 1,
+                     active: doc.enabled === 1 || doc.enabled === true,
+                     disabled: !(doc.enabled === 1 || doc.enabled === true),
                   },
                 },
                 { upsert: true, new: true }

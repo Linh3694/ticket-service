@@ -51,32 +51,48 @@ function buildFrappeHeaders() {
   return headers;
 }
 
-// Helper: fetch Frappe users by Role and ensure they exist in local DB
-async function getUsersByFrappeRole(roleName = 'IT Helpdesk') {
+// Helper: lấy user kỹ thuật ưu tiên từ DB local theo Frappe Role, fallback gọi Frappe
+async function getUsersByFrappeRole(roleName = 'IT Helpdesk', bearerToken = null) {
   try {
-    // Call Frappe to get all users having the role
+    // 1) Ưu tiên lấy từ DB local (đã được đồng bộ bằng pub/sub hoặc các lần gọi trước)
+    // - Ưu tiên field roles (multi-roles từ Frappe)
+    // - Fallback thêm legacy role === 'technical'
+    const localTechnicals = await User.find({
+      $or: [
+        { roles: roleName },
+        { role: 'technical' },
+      ],
+      // Ưu tiên không disabled; không bắt buộc cờ 'active' vì có thể chưa đồng bộ từ Frappe
+      disabled: { $ne: true },
+    }).lean();
+
+    if (Array.isArray(localTechnicals) && localTechnicals.length > 0) {
+      return localTechnicals;
+    }
+
+    // 2) Fallback: gọi trực tiếp Frappe để lấy danh sách user có role
+    const headers = buildFrappeHeaders();
+    if (bearerToken) {
+      headers['Authorization'] = `Bearer ${bearerToken}`;
+      headers['X-Frappe-CSRF-Token'] = bearerToken;
+    }
     const response = await axios.get(`${FRAPPE_API_URL}/api/resource/Has Role`, {
       params: {
         fields: JSON.stringify(['parent']),
         filters: JSON.stringify([["role","=", roleName]]),
         limit_page_length: 1000,
       },
-      headers: buildFrappeHeaders(),
+      headers,
     });
 
     const frappeUserIds = (response.data?.data || []).map(r => r.parent);
     if (frappeUserIds.length === 0) return [];
 
-    // Ensure local users exist for these Frappe users
-    const users = await User.find({ email: { $exists: true } });
-    const existingEmails = new Set(users.map(u => u.email));
-
     const createdLocals = [];
     for (const frappeUserId of frappeUserIds) {
-      // Fetch user details from Frappe
       try {
         const userResp = await axios.get(`${FRAPPE_API_URL}/api/resource/User/${frappeUserId}`, {
-          headers: buildFrappeHeaders(),
+          headers,
           params: {
             fields: JSON.stringify(['name','email','full_name','user_image','enabled','department'])
           }
@@ -84,7 +100,6 @@ async function getUsersByFrappeRole(roleName = 'IT Helpdesk') {
         const fu = userResp.data?.data;
         if (!fu) continue;
 
-        // Upsert local user by email
         const local = await User.findOneAndUpdate(
           { email: fu.email },
           {
@@ -96,6 +111,8 @@ async function getUsersByFrappeRole(roleName = 'IT Helpdesk') {
             provider: 'frappe',
             active: fu.enabled === 1,
             disabled: fu.enabled !== 1,
+            // đảm bảo roles chứa đúng Frappe Role
+            $addToSet: { roles: roleName },
           },
           { new: true, upsert: true }
         );
@@ -105,12 +122,20 @@ async function getUsersByFrappeRole(roleName = 'IT Helpdesk') {
       }
     }
 
-    // Return only locals synced from Frappe role. No fallback to local roles.
     return createdLocals;
   } catch (error) {
     console.error('Error getting users by Frappe role:', error.message);
-    // Do not fallback to local roles. Return empty to surface configuration issue.
-    return [];
+    // fallback cuối: thử lấy từ local thêm lần nữa (phòng khi Frappe lỗi tạm thời)
+    try {
+      const locals = await User.find({
+        $or: [ { roles: roleName }, { role: 'technical' } ],
+        active: true,
+        disabled: { $ne: true },
+      }).lean();
+      return locals;
+    } catch (_) {
+      return [];
+    }
   }
 }
 
@@ -155,11 +180,15 @@ exports.createTicket = async (req, res) => {
   try {
     const { title, description, priority, creator, notes } = req.body;
 
+    // Try to reuse current user's token to fetch IT Helpdesk list if needed
+    const bearerToken = (req.headers['authorization'] || '').replace('Bearer ', '').trim() || null;
+
     const newTicket = await createTicketHelper({
       title,
       description,
       priority,
       creatorId: creator,
+      bearerToken,
       files: req.files || [],
     });
     // notes
@@ -932,7 +961,7 @@ exports.debugTicketGroupChat = async (req, res) => {
   }
 };
 
-async function createTicketHelper({ title, description, creatorId, priority, files = [] }) {
+async function createTicketHelper({ title, description, creatorId, priority, files = [], bearerToken = null }) {
   // 1) Tính SLA Phase 1 (4h, 8:00 - 17:00)
   const phase1Duration = 4;
   const startHour = 8;
@@ -975,16 +1004,25 @@ async function createTicketHelper({ title, description, creatorId, priority, fil
 
   // 3) Tìm user technical ít ticket nhất (từ DB local)
   // Prefer Frappe role 'IT Helpdesk' to decide assignee list
-  const technicalUsers = await getUsersByFrappeRole('IT Helpdesk');
+  const technicalUsers = await getUsersByFrappeRole('IT Helpdesk', bearerToken);
+  if (!technicalUsers || technicalUsers.length === 0) {
+    throw new Error("Không tìm thấy user có Frappe Role 'IT Helpdesk' để gán (local/remote). Vui lòng kiểm tra đồng bộ roles hoặc cấu hình token.");
+  }
   if (!technicalUsers.length) {
     throw new Error("Không tìm thấy user có Frappe Role 'IT Helpdesk' để gán!");
   }
-  const userTicketCounts = await Promise.all(
-    technicalUsers.map(async (u) => {
-      const count = await Ticket.countDocuments({ assignedTo: u._id });
-      return { user: u, count };
-    })
-  );
+    // Prefer active users first when selecting assignee
+    const sortedByActive = [...technicalUsers].sort((a,b) => {
+      const aActive = a.disabled ? 0 : 1;
+      const bActive = b.disabled ? 0 : 1;
+      return bActive - aActive;
+    });
+    const userTicketCounts = await Promise.all(
+      sortedByActive.map(async (u) => {
+        const count = await Ticket.countDocuments({ assignedTo: u._id });
+        return { user: u, count };
+      })
+    );
   userTicketCounts.sort((a, b) => a.count - b.count);
   const leastAssignedUser = userTicketCounts[0].user;
 
