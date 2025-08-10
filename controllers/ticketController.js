@@ -812,6 +812,18 @@ exports.getSubTasksByTicket = async (req, res) => {
   }
 };
 
+// Return current authenticated local user (for mobile to get local _id)
+exports.getMe = async (req, res) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ success: false, message: 'Unauthorized' });
+    }
+    return res.status(200).json({ success: true, user: req.user });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
 // Lấy supportTeam
 exports.getSupportTeam = async (req, res) => {
   try {
