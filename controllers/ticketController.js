@@ -1307,14 +1307,23 @@ exports.createTicketGroupChat = async (req, res) => {
     
     // Tạo group chat qua chat-service
     const CHAT_BASE = process.env.CHAT_SERVICE_URL || process.env.CHAT_SERVICE_PUBLIC_URL || FRAPPE_API_URL;
+    // Thu thập thêm emails để chat-service ánh xạ sang User nội bộ của chat-service
+    const participantEmailsSet = new Set();
+    if (ticket.creator?.email) participantEmailsSet.add(String(ticket.creator.email).toLowerCase());
+    if (ticket.assignedTo?.email) participantEmailsSet.add(String(ticket.assignedTo.email).toLowerCase());
+    if (selectedAdmin?.email) participantEmailsSet.add(String(selectedAdmin.email).toLowerCase());
+    if (req.user?.email) participantEmailsSet.add(String(req.user.email).toLowerCase());
+
     const createResp = await axios.post(`${CHAT_BASE}/api/chats/group`, {
       name: `Ticket: ${ticket.ticketCode}`,
       description: `Group chat tự động cho ticket ${ticket.ticketCode}`,
       participant_ids: participants
         .map((p) => (typeof p === 'string' ? p : (p?.toString?.() || '')))
         .filter((id) => /^[a-f\d]{24}$/i.test(id)),
+      participant_emails: Array.from(participantEmailsSet),
     }, {
       headers: {
+        // Ưu tiên xác thực theo người dùng để creator_id đúng là _id local của chat-service
         Authorization: req.headers['authorization'] || '',
         'X-Service-Token': process.env.CHAT_INTERNAL_TOKEN || process.env.INTERNAL_SERVICE_TOKEN || ''
       }
