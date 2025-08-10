@@ -1301,7 +1301,9 @@ exports.createTicketGroupChat = async (req, res) => {
     const createResp = await axios.post(`${CHAT_BASE}/api/chats/group`, {
       name: `Ticket: ${ticket.ticketCode}`,
       description: `Group chat tự động cho ticket ${ticket.ticketCode}`,
-      participant_ids: participants.map((p) => p.toString()),
+      participant_ids: participants
+        .map((p) => (typeof p === 'string' ? p : (p?.toString?.() || '')))
+        .filter((id) => /^[a-f\d]{24}$/i.test(id)),
     }, {
       headers: {
         Authorization: req.headers['authorization'] || '',
