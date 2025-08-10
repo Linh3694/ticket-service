@@ -20,6 +20,7 @@ router.put("/:ticketId", authenticate, ticketController.updateTicket);
 router.post("/:ticketId/feedback", authenticate, ticketController.addFeedback);
 router.post("/:ticketId/escalate", authenticate, ticketController.escalateTicket);
 router.post("/:ticketId/messages", authenticate, uploadMessage.single("file"), ticketController.sendMessage);
+router.get("/:ticketId/messages", authenticate, ticketController.getTicketMessages);
 router.post("/:ticketId/subtasks", authenticate, ticketController.addSubTask);
 router.get("/:ticketId/subtasks", authenticate, ticketController.getSubTasksByTicket);
 router.put("/:ticketId/subtasks/:subTaskId", authenticate, ticketController.updateSubTaskStatus);

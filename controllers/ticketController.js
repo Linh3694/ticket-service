@@ -641,7 +641,9 @@ exports.sendMessage = async (req, res) => {
       tempId: req.body.tempId || null,
     };
 
-    // Emit to all clients in ticket room
+    // Emit to all clients in ticket room (ensure correct room name)
+    io.to(`ticket:${ticketId}`).emit("newMessage", messageData);
+    // Backward compatibility for any clients that joined plain room id
     io.to(ticketId).emit("newMessage", messageData);
 
     // Gửi thông báo có tin nhắn mới - không gửi cho người gửi
@@ -649,7 +651,7 @@ exports.sendMessage = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      message: "Gửi tin nhắn thành công",
+      message: messageData,
       ticket: updatedTicket,
     });
   } catch (error) {
@@ -812,6 +814,55 @@ exports.getSubTasksByTicket = async (req, res) => {
   }
 };
 
+// Lấy danh sách messages của ticket (phân trang)
+exports.getTicketMessages = async (req, res) => {
+  try {
+    const { ticketId } = req.params;
+    const page = parseInt(req.query.page, 10) || 1;
+    const limit = parseInt(req.query.limit, 10) || 20;
+    const skip = (page - 1) * limit;
+
+    const ticket = await Ticket.findById(ticketId)
+      .populate({
+        path: 'messages.sender',
+        model: 'User',
+        select: 'fullname avatarUrl email',
+      })
+      .lean();
+
+    if (!ticket) {
+      return res.status(404).json({ success: false, message: 'Ticket không tồn tại' });
+    }
+
+    // Phân quyền cơ bản
+    const userId = req.user?._id;
+    const hasAccess = ticket.creator?.toString() === userId?.toString() ||
+      (ticket.assignedTo && ticket.assignedTo?.toString() === userId?.toString()) ||
+      req.user?.role === 'admin' || req.user?.role === 'superadmin';
+    if (!hasAccess) {
+      return res.status(403).json({ success: false, message: 'Bạn không có quyền xem trao đổi của ticket này' });
+    }
+
+    const total = Array.isArray(ticket.messages) ? ticket.messages.length : 0;
+    const sliceStart = Math.max(total - skip - limit, 0);
+    const sliceEnd = Math.max(total - skip, 0);
+    const pageMessages = (ticket.messages || []).slice(sliceStart, sliceEnd);
+
+    return res.status(200).json({
+      success: true,
+      messages: pageMessages,
+      pagination: {
+        page,
+        limit,
+        hasMore: sliceStart > 0,
+        total,
+      },
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
 // Return current authenticated local user (for mobile to get local _id)
 exports.getMe = async (req, res) => {
   try {
@@ -883,35 +934,38 @@ exports.getTicketGroupChat = async (req, res) => {
       return res.status(200).json({ success: true, hasGroup: false, canCreate: true, message: "Ticket chưa có group chat" });
     }
 
-    const groupChat = await Chat.findById(ticket.groupChatId)
-      .populate('participants', 'fullname avatarUrl email department')
-      .populate('creator', 'fullname avatarUrl email')
-      .populate('admins', 'fullname avatarUrl email');
+    // Gọi chat-service để lấy chi tiết group chat
+    const CHAT_BASE = process.env.CHAT_SERVICE_PUBLIC_URL || FRAPPE_API_URL;
+    try {
+      const chatResp = await axios.get(`${CHAT_BASE}/api/chats/${ticket.groupChatId}`, {
+        headers: { Authorization: req.headers['authorization'] || '' }
+      });
+      const groupChat = chatResp.data;
 
-    if (!groupChat) {
-      // Group chat ID tồn tại nhưng record không có - cleanup
-      console.log(`⚠️ Ticket ${ticket.ticketCode} có groupChatId nhưng chat không tồn tại, đang cleanup`);
-      await Ticket.findByIdAndUpdate(ticketId, { $unset: { groupChatId: 1 } });
-      return res.status(404).json({ success: false, message: "Group chat không tồn tại" });
+      // Kiểm tra user có trong group chat không
+      const isParticipant = Array.isArray(groupChat.participants)
+        && groupChat.participants.some((p) => (p._id || p).toString() === userId.toString());
+
+      if (!isParticipant && req.user.role !== "admin" && req.user.role !== "superadmin") {
+        return res.status(403).json({ success: false, message: "Bạn không có quyền truy cập group chat này" });
+      }
+
+      return res.status(200).json({
+        success: true,
+        hasGroup: true,
+        groupChat,
+        isParticipant,
+        canJoin: req.user.role === "admin" || req.user.role === "superadmin" || isParticipant,
+      });
+    } catch (e) {
+      // Nếu chat-service trả về 404, cleanup groupChatId ở ticket
+      if (e.response?.status === 404) {
+        console.log(`⚠️ Ticket ${ticket.ticketCode} có groupChatId nhưng chat không tồn tại ở chat-service, đang cleanup`);
+        await Ticket.findByIdAndUpdate(ticketId, { $unset: { groupChatId: 1 } });
+        return res.status(404).json({ success: false, message: "Group chat không tồn tại" });
+      }
+      throw e;
     }
-
-    // Kiểm tra user có trong group chat không
-    const isParticipant = groupChat.participants.some(p => p._id.equals(userId));
-    
-    // Admin/Superadmin có thể xem group chat nhưng chưa join
-    // Chỉ check permission cho user thông thường
-    if (!isParticipant && req.user.role !== "admin" && req.user.role !== "superadmin") {
-      return res.status(403).json({ success: false, message: "Bạn không có quyền truy cập group chat này" });
-    }
-
-    // Trả về group chat với thông tin về việc user có phải participant không
-    res.status(200).json({ 
-      success: true, 
-      hasGroup: true,
-      groupChat,
-      isParticipant,
-      canJoin: req.user.role === "admin" || req.user.role === "superadmin" || isParticipant
-    });
     
   } catch (error) {
     console.error('Lỗi khi lấy group chat của ticket:', error);
@@ -1112,38 +1166,31 @@ exports.createTicketGroupChat = async (req, res) => {
       return res.status(403).json({ success: false, message: "Bạn không có quyền tạo group chat cho ticket này" });
     }
 
-    // Kiểm tra xem đã có group chat chưa (kiểm tra cả trong DB và thực tế)
+    // Kiểm tra xem đã có group chat chưa (gọi chat-service xác minh)
     if (ticket.groupChatId) {
-      const existingChat = await Chat.findById(ticket.groupChatId);
-      if (existingChat) {
-        // Kiểm tra xem user hiện tại có trong participants không
-        const isUserInChat = existingChat.participants.some(p => p.equals(userId));
-        
-        // Chỉ auto-add nếu user là creator hoặc assignedTo và chưa có trong chat
-        const isCreatorOrAssigned = ticket.creator._id.equals(userId) || 
-                                   (ticket.assignedTo && ticket.assignedTo._id.equals(userId));
-        
-        if (!isUserInChat && isCreatorOrAssigned) {
-          // Thêm user hiện tại vào group chat nếu họ là creator/assignedTo
-          console.log(`➕ Adding ${isCreatorOrAssigned ? 'creator/assignedTo' : 'currentUser'} ${userId} to existing group chat ${existingChat._id}`);
-          existingChat.participants.push(userId);
-          await existingChat.save();
-        }
-        
-        // Populate để trả về full data
-        const populatedChat = await Chat.findById(existingChat._id)
-          .populate('participants', 'fullname avatarUrl email department')
-          .populate('creator', 'fullname avatarUrl email')
-          .populate('admins', 'fullname avatarUrl email');
-        
-        return res.status(200).json({ 
-          success: true, 
-          message: "Group chat đã tồn tại",
-          groupChat: populatedChat 
+      const CHAT_BASE = process.env.CHAT_SERVICE_PUBLIC_URL || FRAPPE_API_URL;
+      try {
+        const checkResp = await axios.get(`${CHAT_BASE}/api/chats/${ticket.groupChatId}`, {
+          headers: { Authorization: req.headers['authorization'] || '' }
         });
-      } else {
-        // Group chat ID tồn tại nhưng record không có - xóa ID và tạo mới
-        console.log(`⚠️ Ticket ${ticket.ticketCode} có groupChatId nhưng chat không tồn tại, sẽ tạo mới`);
+        const existingChat = checkResp.data;
+        // Đảm bảo current user trong participants nếu là creator/assignedTo
+        const isUserInChat = Array.isArray(existingChat.participants) && existingChat.participants.some(p => (p._id || p).toString() === userId.toString());
+        const isCreatorOrAssigned = ticket.creator._id.equals(userId) || (ticket.assignedTo && ticket.assignedTo._id.equals(userId));
+        if (!isUserInChat && isCreatorOrAssigned) {
+          try {
+            await axios.post(`${CHAT_BASE}/api/chats/${ticket.groupChatId}/add-user`, { user_id: userId }, { headers: { Authorization: req.headers['authorization'] || '' } });
+            // Re-fetch chat
+            const refetch = await axios.get(`${CHAT_BASE}/api/chats/${ticket.groupChatId}`, { headers: { Authorization: req.headers['authorization'] || '' } });
+            return res.status(200).json({ success: true, message: 'Group chat đã tồn tại', groupChat: refetch.data });
+          } catch (_) {
+            // Ignore add failure, still return existing chat
+          }
+        }
+        return res.status(200).json({ success: true, message: 'Group chat đã tồn tại', groupChat: existingChat });
+      } catch (e) {
+        // Not found -> clear and create new
+        console.log(`⚠️ Ticket ${ticket.ticketCode} groupChatId không hợp lệ, sẽ tạo mới`);
         ticket.groupChatId = null;
       }
     }
@@ -1204,25 +1251,23 @@ exports.createTicketGroupChat = async (req, res) => {
       finalParticipants: participants
     });
     
-    // Tạo group chat
-    const groupChat = await Chat.create({
+    // Tạo group chat qua chat-service
+    const CHAT_BASE = process.env.CHAT_SERVICE_PUBLIC_URL || FRAPPE_API_URL;
+    const createResp = await axios.post(`${CHAT_BASE}/api/chats/group`, {
       name: `Ticket: ${ticket.ticketCode}`,
       description: `Group chat tự động cho ticket ${ticket.ticketCode}`,
-      isGroup: true,
-      avatar: "ticket-icon.svg",
-      creator: userId,
-      admins: [selectedAdmin ? selectedAdmin._id : (ticket.assignedTo ? ticket.assignedTo._id : userId)],
-      participants: participants,
-      settings: {
-        allowMembersToAdd: false,
-        allowMembersToEdit: false,
-        muteNotifications: false
-      }
+      participant_ids: participants.map((p) => p.toString()),
+    }, {
+      headers: { Authorization: req.headers['authorization'] || '' }
     });
-    
-    console.log(`✅ Đã tạo group chat ${groupChat._id} cho ticket ${ticket.ticketCode} với ${participants.length} participants`);
-    console.log(`👥 Participants ban đầu:`, participants.map(p => p.toString()));
-    
+
+    const groupChat = createResp.data?.message || createResp.data; // support both shapes
+    if (!groupChat || !groupChat._id) {
+      throw new Error('Không thể tạo group chat qua chat-service');
+    }
+
+    console.log(`✅ Đã tạo group chat ${groupChat._id} (chat-service) cho ticket ${ticket.ticketCode} với ${participants.length} participants`);
+
     // Lưu group chat ID vào ticket
     ticket.groupChatId = groupChat._id;
     
@@ -1243,20 +1288,16 @@ exports.createTicketGroupChat = async (req, res) => {
     
     await ticket.save();
     
-    // Populate thông tin cho response
-    const populatedGroupChat = await Chat.findById(groupChat._id)
-      .populate('participants', 'fullname avatarUrl email department')
-      .populate('creator', 'fullname avatarUrl email')
-      .populate('admins', 'fullname avatarUrl email');
-    
-    console.log(`✅ Đã tạo group chat ${groupChat._id} cho ticket ${ticket.ticketCode}`);
-    
-    res.status(201).json({ 
-      success: true, 
+    // Trả về dữ liệu chat từ chat-service
+    const refetch = await axios.get(`${CHAT_BASE}/api/chats/${groupChat._id}`, { headers: { Authorization: req.headers['authorization'] || '' } });
+    const finalChat = refetch.data || groupChat;
+
+    res.status(201).json({
+      success: true,
       message: "Tạo group chat thành công",
-      groupChat: populatedGroupChat,
-      participantsCount: populatedGroupChat.participants.length,
-      isCurrentUserInChat: populatedGroupChat.participants.some(p => p._id.equals(userId))
+      groupChat: finalChat,
+      participantsCount: Array.isArray(finalChat.participants) ? finalChat.participants.length : undefined,
+      isCurrentUserInChat: Array.isArray(finalChat.participants) ? finalChat.participants.some(p => (p._id || p).toString() === userId.toString()) : true
     });
     
   } catch (error) {
@@ -1294,33 +1335,21 @@ exports.joinTicketGroupChat = async (req, res) => {
       return res.status(404).json({ success: false, message: "Ticket chưa có group chat" });
     }
 
-    const groupChat = await Chat.findById(ticket.groupChatId);
-    if (!groupChat) {
-      return res.status(404).json({ success: false, message: "Group chat không tồn tại" });
+    const CHAT_BASE = process.env.CHAT_SERVICE_PUBLIC_URL || FRAPPE_API_URL;
+    // Kiểm tra đã là participant?
+    try {
+      const current = await axios.get(`${CHAT_BASE}/api/chats/${ticket.groupChatId}`, { headers: { Authorization: req.headers['authorization'] || '' } });
+      const currentChat = current.data;
+      const isAlreadyParticipant = Array.isArray(currentChat.participants) && currentChat.participants.some(p => (p._id || p).toString() === userId.toString());
+      if (!isAlreadyParticipant) {
+        await axios.post(`${CHAT_BASE}/api/chats/${ticket.groupChatId}/add-user`, { user_id: userId }, { headers: { Authorization: req.headers['authorization'] || '' } });
+      }
+    } catch (e) {
+      if (e.response?.status === 404) {
+        return res.status(404).json({ success: false, message: 'Group chat không tồn tại' });
+      }
+      throw e;
     }
-
-    // Kiểm tra xem user đã là participant chưa
-    const isAlreadyParticipant = groupChat.participants.some(p => p.equals(userId));
-    
-    if (isAlreadyParticipant) {
-      // Đã là participant, chỉ cần populate và trả về
-      const populatedGroupChat = await Chat.findById(ticket.groupChatId)
-        .populate('participants', 'fullname avatarUrl email department')
-        .populate('creator', 'fullname avatarUrl email')
-        .populate('admins', 'fullname avatarUrl email');
-        
-      return res.status(200).json({ 
-        success: true, 
-        message: "Bạn đã là thành viên của group chat",
-        groupChat: populatedGroupChat,
-        isParticipant: true
-      });
-    }
-
-    // Thêm user vào group chat
-    console.log(`➕ ${req.user.role} ${req.user.fullname} joining group chat ${groupChat._id} for ticket ${ticket.ticketCode}`);
-    groupChat.participants.push(userId);
-    await groupChat.save();
 
     // Ghi log vào ticket history
     ticket.history.push({
@@ -1330,19 +1359,15 @@ exports.joinTicketGroupChat = async (req, res) => {
     });
     await ticket.save();
 
-    // Populate thông tin để trả về
-    const updatedGroupChat = await Chat.findById(ticket.groupChatId)
-      .populate('participants', 'fullname avatarUrl email department')
-      .populate('creator', 'fullname avatarUrl email')
-      .populate('admins', 'fullname avatarUrl email');
+    // Lấy lại thông tin chat từ chat-service để trả về
+    const updated = await axios.get(`${CHAT_BASE}/api/chats/${ticket.groupChatId}`, { headers: { Authorization: req.headers['authorization'] || '' } });
+    const updatedGroupChat = updated.data;
 
-    console.log(`✅ ${req.user.fullname} đã tham gia group chat ${groupChat._id}`);
-    
-    res.status(200).json({ 
-      success: true, 
+    res.status(200).json({
+      success: true,
       message: "Tham gia group chat thành công",
       groupChat: updatedGroupChat,
-      isParticipant: true
+      isParticipant: true,
     });
     
   } catch (error) {
