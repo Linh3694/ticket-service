@@ -1,8 +1,12 @@
 const Ticket = require("../models/Ticket");
 const SupportTeam = require("../models/SupportTeam");
+<<<<<<< HEAD
 const Chat = require("../models/Chat");
 const User = require("../models/Users");
 const notificationService = require('../services/notificationService'); // Thay thế bằng notificationService
+=======
+const notificationService = require('../services/notificationService');
+>>>>>>> 11f0a33 (update)
 const mongoose = require("mongoose");
 const axios = require('axios');
 
@@ -142,7 +146,6 @@ async function getUsersByFrappeRole(roleName = 'IT Helpdesk', bearerToken = null
 
 function getVNTimeString() {
   const now = new Date();
-  // Định dạng giờ, phút, ngày, tháng, năm theo múi giờ Việt Nam
   const options = {
     timeZone: "Asia/Ho_Chi_Minh",
     hour: "2-digit",
@@ -151,11 +154,7 @@ function getVNTimeString() {
     month: "2-digit",
     year: "numeric",
   };
-  // Kết quả dạng: dd/mm/yyyy, hh:mm:ss
-  // Ta chỉ lấy: hh:mm (GMT+7) dd/mm/yyyy
   const formatted = new Intl.DateTimeFormat("vi-VN", options).format(now);
-  // Tuỳ vào cấu trúc trả về, có thể cần tách chuỗi, nhưng ở mức đơn giản, 
-  // bạn có thể thêm thủ công (GMT+7) vào sau:
   return `${formatted}`;
 }
 
@@ -192,7 +191,6 @@ exports.createTicket = async (req, res) => {
       bearerToken,
       files: req.files || [],
     });
-    // notes
     newTicket.notes = notes || "";
     await newTicket.save();
 
@@ -207,35 +205,30 @@ exports.createTicket = async (req, res) => {
 
 // a) Lấy danh sách ticket
 exports.getTickets = async (req, res) => {
-  console.log("🔵 Kiểm tra req.user:", req.user); // ✅ Kiểm tra user có tồn tại không
+  console.log("🔵 Kiểm tra req.user:", req.user);
 
   const { status, priority, userTickets, creator, search } = req.query;
-  const userId = req.user._id; // Lấy ID user từ token
+  const userId = req.user._id;
 
   console.log("Query parameters:", { status, priority, userTickets, creator, search });
 
   try {
     let query = {};
 
-    // Nếu có parameter creator, filter theo creator
     if (creator) {
       query.creator = creator;
       console.log("🔍 Filtering by creator:", creator);
     }
-    // Nếu có parameter userTickets, chỉ lấy ticket của user đó
     else if (userTickets) {
       query = { $or: [{ creator: userTickets }, { assignedTo: userTickets }] };
     } else {
-    // Nếu không có userTickets, kiểm tra role
       if (req.user.role === "superadmin") {
-        query = {}; // Lấy tất cả ticket
+        query = {};
       } else {
-        // Các role khác: xem ticket mà họ tạo ra hoặc được gán cho họ
         query = { $or: [{ creator: userId }, { assignedTo: userId }] };
       }
     }
 
-    // Add search functionality
     if (search) {
       query.$and = query.$and || [];
       query.$and.push({
@@ -250,7 +243,6 @@ exports.getTickets = async (req, res) => {
     if (status === "assignedOrProcessing") {
       query.status = { $in: ["Assigned", "Processing"] };
     } else if (status) {
-      // Các trường hợp khác
       query.status = status;
     }
     if (priority) query.priority = priority;
@@ -258,7 +250,7 @@ exports.getTickets = async (req, res) => {
     console.log("Final query:", JSON.stringify(query, null, 2));
 
     const tickets = await Ticket.find(query)
-      .sort({ createdAt: -1 }) // Sắp xếp giảm dần theo createdAt
+      .sort({ createdAt: -1 })
       .populate("creator assignedTo");
 
     console.log("Found tickets:", tickets.length);
@@ -270,17 +262,16 @@ exports.getTickets = async (req, res) => {
   }
 };
 
-// Ví dụ thêm 1 API getTicketById
+// Lấy ticket by ID
 exports.getTicketById = async (req, res) => {
   try {
     const ticket = await Ticket.findById(req.params.ticketId)
       .populate("creator assignedTo")
       .populate({
         path: "messages.sender",
-        model: "User",  // Đảm bảo đúng model User
-        select: "fullname avatarUrl email",  // ✅ Chỉ lấy fullname, avatarUrl, email
+        model: "User",
+        select: "fullname avatarUrl email",
       })
-      // Bổ sung populate cho subTasks.assignedTo:
       .populate({
         path: "subTasks.assignedTo",
         model: "User",
@@ -306,21 +297,19 @@ exports.updateTicket = async (req, res) => {
 
   try {
     const ticket = await Ticket.findById(ticketId)
-      .populate('creator')  // Thêm populate để lấy thông tin creator
+      .populate('creator')
       .populate('assignedTo');
 
     if (!ticket) {
       return res.status(404).json({ success: false, message: "Ticket không tồn tại" });
     }
 
-    // Thêm dòng này để tránh lỗi ReferenceError
     const previousStatus = ticket.status;
     const previousAssignedTo = ticket.assignedTo;
 
     console.log("Ticket hiện tại:", ticket);
     console.log("Received updates:", updates);
 
-    // Ghi log nếu status thay đổi
     if (updates.status && updates.status !== ticket.status) {
       ticket.history.push({
         timestamp: new Date(),
@@ -329,7 +318,6 @@ exports.updateTicket = async (req, res) => {
       });
     }
 
-    // Nếu có cancelReason, ghi log
     if (updates.status === "Cancelled" && updates.cancelReason) {
       ticket.history.push({
         timestamp: new Date(),
@@ -340,7 +328,6 @@ exports.updateTicket = async (req, res) => {
 
     Object.assign(ticket, updates);
 
-    // Nếu chuyển sang Processing -> cập nhật SLA Phase 2
     if (updates.status === "Processing") {
       const slaDurations = { Low: 72, Medium: 48, High: 24, Urgent: 4 };
       const priority = updates.priority || ticket.priority;
@@ -357,10 +344,8 @@ exports.updateTicket = async (req, res) => {
     await ticket.save();
     console.log("Ticket đã được lưu thành công:", ticket);
 
-    // Xác định loại hành động để gửi thông báo phù hợp
     let action = 'updated';
     if (req.body.status && ticket.status !== previousStatus) {
-      // Check if we have a specific notifyAction from client
       if (req.body.notifyAction) {
         action = req.body.notifyAction;
       } else {
@@ -370,10 +355,8 @@ exports.updateTicket = async (req, res) => {
       action = 'assigned';
     }
 
-    // Gửi thông báo cập nhật (đã bao gồm thông báo cho creator và superadmin)
     await notificationService.sendTicketUpdateNotification(ticket, action);
 
-    // Nếu đây là action feedback_added, gửi thêm thông báo feedback
     if (action === 'feedback_added' && ticket.feedback) {
       await notificationService.sendFeedbackNotification(ticket);
     }
@@ -391,17 +374,14 @@ exports.updateTicket = async (req, res) => {
 // d) Thêm phản hồi
 exports.addFeedback = async (req, res) => {
   const { ticketId } = req.params;
-  const { rating, comment, badges } = req.body; // thêm badges
+  const { rating, comment, badges } = req.body;
 
   try {
     const ticket = await Ticket.findById(ticketId);
 
-    // Kiểm tra xem lần đầu đánh giá hay đã đánh giá trước đó
-    const hasPreviousRating = !!ticket.feedback?.rating; // true/false
+    const hasPreviousRating = !!ticket.feedback?.rating;
 
     if (!hasPreviousRating) {
-      // Lần đầu đánh giá:
-      // - Không bắt buộc comment
       if (!rating) {
         return res.status(400).json({
           success: false,
@@ -409,12 +389,11 @@ exports.addFeedback = async (req, res) => {
         });
       }
 
-      // Gán giá trị feedback
       ticket.feedback = {
         assignedTo: ticket.assignedTo,
         rating,
-        comment: comment || "", // comment không bắt buộc, nếu không có thì lưu chuỗi rỗng
-        badges: badges || [], // Gán mảng huy hiệu
+        comment: comment || "",
+        badges: badges || [],
       };
 
       ticket.history.push({
@@ -424,8 +403,6 @@ exports.addFeedback = async (req, res) => {
       });
 
     } else {
-      // Đã có rating trước đó => cập nhật rating
-      // - Bắt buộc phải có comment giải thích tại sao muốn đổi
       if (!rating) {
         return res.status(400).json({
           success: false,
@@ -454,7 +431,6 @@ exports.addFeedback = async (req, res) => {
 
     await ticket.save();
 
-    // Gửi thông báo khi khách hàng gửi feedback
     await notificationService.sendFeedbackNotification(ticket);
 
     return res.status(200).json({
@@ -471,10 +447,8 @@ exports.addFeedback = async (req, res) => {
 
 exports.getTechnicalStats = async (req, res) => {
   try {
-    // Giả sử req.params.userId là ID của technical ta muốn xem thống kê
     const { userId } = req.params;
 
-    // Tìm tất cả ticket có assignedTo = userId, feedback.rating tồn tại
     const tickets = await Ticket.find({
       assignedTo: userId,
       "feedback.rating": { $exists: true }
@@ -489,14 +463,11 @@ exports.getTechnicalStats = async (req, res) => {
       });
     }
 
-    // 1) Tính trung bình rating
     const totalFeedbacks = tickets.length;
     const sumRating = tickets.reduce((sum, t) => sum + t.feedback.rating, 0);
     const averageRating = sumRating / totalFeedbacks;
 
-    // 2) Thống kê huy hiệu
-    // feedback.badges là 1 mảng, ta gộp tất cả mảng -> count frequency
-    const badgesCount = {}; // { 'Nhiệt Huyết': 2, 'Chu Đáo': 3, ... }
+    const badgesCount = {};
     tickets.forEach(t => {
       if (t.feedback.badges && Array.isArray(t.feedback.badges)) {
         t.feedback.badges.forEach(badge => {
@@ -560,14 +531,13 @@ exports.checkSLA = async () => {
       action: `Hết hạn SLA. Ticket đã được nâng cấp lên mức ${ticket.escalateLevel}`,
     });
 
-    // Gửi email thông báo (có thể tích hợp sau)
     await ticket.save();
   });
 
   console.log(`${tickets.length} tickets escalated due to SLA breach.`);
 };
 
-// controllers/ticketController.js
+// Gửi tin nhắn trong ticket
 exports.sendMessage = async (req, res) => {
   const { ticketId } = req.params;
   const { text } = req.body;
@@ -578,7 +548,6 @@ exports.sendMessage = async (req, res) => {
       return res.status(404).json({ success: false, message: "Ticket không tồn tại" });
     }
 
-    // Chỉ creator hoặc assignedTo mới được chat
     const isParticipant =
       ticket.creator.equals(req.user._id) ||
       (ticket.assignedTo && ticket.assignedTo.equals(req.user._id));
@@ -590,18 +559,15 @@ exports.sendMessage = async (req, res) => {
       });
     }
 
-    // Nếu có file trong req.file => upload ảnh
     if (req.file) {
-      // Tạo message kiểu ảnh
       const filePath = `/uploads/Messages/${req.file.filename}`;
       ticket.messages.push({
         sender: req.user._id,
-        text: filePath,      // Lưu đường dẫn tương đối thay vì URL đầy đủ
+        text: filePath,
         timestamp: new Date(),
-        type: "image",      // Đánh dấu để frontend hiểu đây là ảnh
+        type: "image",
       });
     } else {
-      // Tin nhắn text
       if (!text?.trim()) {
         return res.status(400).json({
           success: false,
@@ -617,7 +583,6 @@ exports.sendMessage = async (req, res) => {
     }
 
     await ticket.save();
-    // Re-fetch ticket để đảm bảo các trường, bao gồm messages với field type, được populate đầy đủ
     const updatedTicket = await Ticket.findById(ticketId)
       .populate("creator assignedTo")
       .populate({
@@ -626,11 +591,9 @@ exports.sendMessage = async (req, res) => {
         select: "fullname avatarUrl email",
       });
 
-    // Emit socket event to broadcast new message với tối ưu
     const lastMessage = updatedTicket.messages[updatedTicket.messages.length - 1];
     const io = req.app.get("io");
 
-    // Broadcast enhanced message data
     const messageData = {
       _id: lastMessage._id,
       text: lastMessage.text,
@@ -641,12 +604,14 @@ exports.sendMessage = async (req, res) => {
       tempId: req.body.tempId || null,
     };
 
+<<<<<<< HEAD
     // Emit to all clients in ticket room (ensure correct room name)
     io.to(`ticket:${ticketId}`).emit("newMessage", messageData);
     // Backward compatibility for any clients that joined plain room id
+=======
+>>>>>>> 11f0a33 (update)
     io.to(ticketId).emit("newMessage", messageData);
 
-    // Gửi thông báo có tin nhắn mới - không gửi cho người gửi
     await notificationService.sendTicketUpdateNotification(ticket, 'comment_added', req.user._id);
 
     return res.status(200).json({
@@ -674,13 +639,28 @@ exports.addSubTask = async (req, res) => {
       return res.status(404).json({ success: false, message: "Ticket không tồn tại!" });
     }
 
-    // Tìm user theo _id hoặc fullname
     let assignedUser = null;
     if (mongoose.Types.ObjectId.isValid(assignedTo)) {
       assignedUser = await User.findById(assignedTo);
     }
     if (!assignedUser) {
+<<<<<<< HEAD
       assignedUser = await User.findOne({ fullname: assignedTo });
+=======
+      try {
+        const response = await axios.get(`${FRAPPE_API_URL}/api/resource/User?filters=[["full_name","=","${assignedTo}"]]`, {
+          headers: {
+            'Authorization': req.headers.authorization,
+            'X-Frappe-CSRF-Token': req.headers.authorization?.replace('Bearer ', '')
+          }
+        });
+        if (response.data.data && response.data.data.length > 0) {
+          assignedUser = response.data.data[0];
+        }
+      } catch (error) {
+        console.error('Error finding user by fullname:', error);
+      }
+>>>>>>> 11f0a33 (update)
     }
     if (!assignedUser) {
       return res.status(400).json({
@@ -701,7 +681,6 @@ exports.addSubTask = async (req, res) => {
 
     ticket.subTasks.push(newSubTask);
 
-    // Ghi log
     ticket.history.push({
       timestamp: new Date(),
       action: ` <strong>${req.user.fullname}</strong> đã tạo subtask <strong>"${title}"</strong>(trạng thái: <strong>${finalStatus}</strong>)`,
@@ -710,7 +689,6 @@ exports.addSubTask = async (req, res) => {
 
     await ticket.save();
 
-    // Populate sau khi thêm
     const updatedTicket = await Ticket.findById(ticketId)
       .populate("creator assignedTo")
       .populate("subTasks.assignedTo");
@@ -742,7 +720,6 @@ exports.updateSubTaskStatus = async (req, res) => {
       return res.status(400).json({ success: false, message: "Trạng thái không hợp lệ!" });
     }
 
-    // Ghi log nếu trạng thái thay đổi
     if (subTask.status !== status) {
       if (subTask.status !== status) {
         ticket.history.push({
@@ -753,7 +730,6 @@ exports.updateSubTaskStatus = async (req, res) => {
       }
     }
 
-    // Cập nhật subtask
     subTask.status = status;
     subTask.updatedAt = new Date();
 
@@ -780,7 +756,6 @@ exports.deleteSubTask = async (req, res) => {
       return res.status(404).json({ success: false, message: "Sub-task không tồn tại" });
     }
 
-    // Ghi log trước khi xóa
     ticket.history.push({
       timestamp: new Date(),
       action: ` <strong>${req.user.fullname}</strong> đã xoá subtask <strong>"${subTask.title}"</strong>`,
@@ -896,7 +871,7 @@ exports.addUserToSupportTeam = async (req, res) => {
   }
 };
 
-// (Tuỳ chọn) Xoá user khỏi supportTeam
+// Xoá user khỏi supportTeam
 exports.removeUserFromSupportTeam = async (req, res) => {
   try {
     const { userId } = req.body;
@@ -907,6 +882,7 @@ exports.removeUserFromSupportTeam = async (req, res) => {
   }
 };
 
+<<<<<<< HEAD
 // Lấy group chat của ticket
 exports.getTicketGroupChat = async (req, res) => {
   try {
@@ -1084,6 +1060,9 @@ exports.debugTicketGroupChat = async (req, res) => {
 };
 
 async function createTicketHelper({ title, description, creatorId, fallbackCreatorId = null, priority, files = [], bearerToken = null }) {
+=======
+async function createTicketHelper({ title, description, creatorId, priority, files = [] }) {
+>>>>>>> 11f0a33 (update)
   // 1) Tính SLA Phase 1 (4h, 8:00 - 17:00)
   const phase1Duration = 4;
   const startHour = 8;
@@ -1124,11 +1103,18 @@ async function createTicketHelper({ title, description, creatorId, fallbackCreat
     ticketCode = `IT-${nextCode}`;
   }
 
+<<<<<<< HEAD
   // 3) Tìm user technical ít ticket nhất (từ DB local)
   // Prefer Frappe role 'IT Helpdesk' to decide assignee list
   const technicalUsers = await getUsersByFrappeRole('IT Helpdesk', bearerToken);
   if (!technicalUsers || technicalUsers.length === 0) {
     throw new Error("Không tìm thấy user có Frappe Role 'IT Helpdesk' để gán (local/remote). Vui lòng kiểm tra đồng bộ roles hoặc cấu hình token.");
+=======
+  // 3) Tìm user technical ít ticket nhất
+  const technicalUsers = await getTechnicalUsers(process.env.FRAPPE_API_TOKEN);
+  if (!technicalUsers.length) {
+    throw new Error("Không có user technical nào để gán!");
+>>>>>>> 11f0a33 (update)
   }
   if (!technicalUsers.length) {
     throw new Error("Không tìm thấy user có Frappe Role 'IT Helpdesk' để gán!");
@@ -1181,7 +1167,11 @@ async function createTicketHelper({ title, description, creatorId, fallbackCreat
     priority,
     creator: creatorObjectId,
     sla: slaPhase1Deadline,
+<<<<<<< HEAD
     assignedTo: leastAssignedUser._id,
+=======
+    assignedTo: leastAssignedUser.name,
+>>>>>>> 11f0a33 (update)
     attachments,
     status: "Assigned",
     history: [
@@ -1198,6 +1188,7 @@ async function createTicketHelper({ title, description, creatorId, fallbackCreat
   return newTicket;
 }
 
+<<<<<<< HEAD
 // Tạo group chat cho ticket theo yêu cầu
 exports.createTicketGroupChat = async (req, res) => {
   try {
@@ -1443,3 +1434,6 @@ exports.joinTicketGroupChat = async (req, res) => {
     res.status(500).json({ success: false, message: error.message });
   }
 };
+=======
+exports.createTicketHelper = createTicketHelper;
+>>>>>>> 11f0a33 (update)

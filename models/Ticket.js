@@ -92,13 +92,7 @@ const ticketSchema = new mongoose.Schema(
       notes:{
         type: String,
         default: "",
-      },
-      // Group chat tự động được tạo cho ticket
-      groupChatId: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: "Chat"
       }
-      
     },
     { timestamps: true }
   );

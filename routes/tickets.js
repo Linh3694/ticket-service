@@ -5,17 +5,13 @@ const { authenticate } = require("../middleware/authMiddleware");
 const upload = require("../middleware/uploadTicket");
 const uploadMessage = require("../middleware/uploadMessage");
 
-// a) Tạo ticket
+// Ticket routes
 router.post("/", authenticate, upload.array("attachments", 15), ticketController.createTicket);
 router.get("/technical-stats/:userId", ticketController.getTechnicalStats);
 router.get("/support-team", ticketController.getSupportTeam);
 router.get("/", authenticate, ticketController.getTickets);
 router.get("/me", authenticate, ticketController.getMe);
 router.get("/:ticketId", authenticate, ticketController.getTicketById);
-router.get("/:ticketId/group-chat", authenticate, ticketController.getTicketGroupChat);
-router.post("/:ticketId/group-chat", authenticate, ticketController.createTicketGroupChat);
-router.post("/:ticketId/group-chat/join", authenticate, ticketController.joinTicketGroupChat);
-router.get("/:ticketId/group-chat/debug", authenticate, ticketController.debugTicketGroupChat);
 router.put("/:ticketId", authenticate, ticketController.updateTicket);
 router.post("/:ticketId/feedback", authenticate, ticketController.addFeedback);
 router.post("/:ticketId/escalate", authenticate, ticketController.escalateTicket);
