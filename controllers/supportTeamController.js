@@ -61,9 +61,11 @@ exports.getAllTeamMembers = async (req, res) => {
     }
     
     res.status(200).json({ 
-      success: true, 
-      members,
-      total: members.length 
+      success: true,
+      data: {
+        members,
+        total: members.length
+      }
     });
   } catch (error) {
     console.error('Error getting team members:', error);
@@ -89,8 +91,8 @@ exports.getTeamMemberById = async (req, res) => {
     }
     
     res.status(200).json({ 
-      success: true, 
-      member 
+      success: true,
+      data: { member }
     });
   } catch (error) {
     console.error('Error getting team member:', error);
@@ -125,8 +127,8 @@ exports.getFrappeUsers = async (req, res) => {
     }));
     
     res.status(200).json({ 
-      success: true, 
-      users: formattedUsers 
+      success: true,
+      data: { users: formattedUsers }
     });
   } catch (error) {
     console.error('Error getting Frappe users:', error);
@@ -173,9 +175,9 @@ exports.createOrUpdateTeamMember = async (req, res) => {
     });
     
     res.status(200).json({ 
-      success: true, 
-      message: 'Team member saved successfully',
-      member 
+      success: true,
+      data: { member },
+      message: 'Team member saved successfully'
     });
   } catch (error) {
     console.error('Error creating/updating team member:', error);
@@ -222,9 +224,9 @@ exports.updateTeamMemberRoles = async (req, res) => {
     await member.save();
     
     res.status(200).json({ 
-      success: true, 
-      message: 'Roles updated successfully',
-      member 
+      success: true,
+      data: { member },
+      message: 'Roles updated successfully'
     });
   } catch (error) {
     console.error('Error updating member roles:', error);
@@ -243,7 +245,8 @@ exports.deleteTeamMember = async (req, res) => {
     const message = await SupportTeamMember.removeMember(userId);
     
     res.status(200).json({ 
-      success: true, 
+      success: true,
+      data: null,
       message 
     });
   } catch (error) {
@@ -276,8 +279,8 @@ exports.getAvailableRoles = async (req, res) => {
     });
     
     res.status(200).json({ 
-      success: true, 
-      roles: rolesWithLabels 
+      success: true,
+      data: { roles: rolesWithLabels }
     });
   } catch (error) {
     console.error('Error getting available roles:', error);
@@ -296,9 +299,11 @@ exports.getMembersByRole = async (req, res) => {
     const members = await SupportTeamMember.getMembersByRole(role);
     
     res.status(200).json({ 
-      success: true, 
-      members,
-      total: members.length 
+      success: true,
+      data: {
+        members,
+        total: members.length
+      }
     });
   } catch (error) {
     console.error('Error getting members by role:', error);
@@ -331,9 +336,9 @@ exports.updateMemberStats = async (req, res) => {
     });
     
     res.status(200).json({ 
-      success: true, 
-      message: 'Stats updated successfully',
-      member 
+      success: true,
+      data: { member },
+      message: 'Stats updated successfully'
     });
   } catch (error) {
     console.error('Error updating member stats:', error);
