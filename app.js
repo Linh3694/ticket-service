@@ -59,7 +59,15 @@ const corsOptions = {
   origin: process.env.ALLOWED_ORIGINS?.split(',') || ['*'],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  allowedHeaders: [
+    'Content-Type', 
+    'Authorization', 
+    'X-Requested-With',
+    'X-Frappe-Token',
+    'X-Frappe-CSRF-Token',
+    'X-Service-Token'
+  ],
+  exposedHeaders: ['Content-Length', 'X-Request-Id']
 };
 
 app.use(cors(corsOptions));
