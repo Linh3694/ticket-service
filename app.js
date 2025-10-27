@@ -159,15 +159,7 @@ app.use("/api/method", ticketRoutes);
 app.use("/api/resource", ticketRoutes);
 
 // Initialize services
-(async () => {
-  try {
-    // Subscribe to chat events
-    await chatService.subscribeToChatEvents();
-    console.log('✅ [Ticket Service] Services initialized successfully');
-  } catch (error) {
-    console.error('❌ [Ticket Service] Error initializing services:', error);
-  }
-})();
+console.log('✅ [Ticket Service] Services initialized successfully');
 
 // Socket.IO events
 io.on('connection', (socket) => {
