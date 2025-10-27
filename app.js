@@ -112,13 +112,6 @@ app.get('/health', async (req, res) => {
       healthStatus.redis_error = error.message;
     }
 
-    // Kiểm tra Chat service
-    const chatHealth = await chatService.healthCheck();
-    healthStatus.chat_service = chatHealth.status;
-    if (chatHealth.status === 'error') {
-      healthStatus.chat_error = chatHealth.message;
-    }
-
     // Kiểm tra Notification service
     const notificationHealth = await notificationService.healthCheck();
     healthStatus.notification_service = notificationHealth.status;
@@ -151,15 +144,14 @@ app.get('/health', async (req, res) => {
 // Import routes
 const ticketRoutes = require('./routes/tickets');
 const emailRoutes = require('./routes/emailRoutes');
+const supportTeamRoutes = require('./routes/supportTeam');
 
 // Import services
 const notificationService = require('./services/notificationService');
-const chatService = require('./services/chatService');
 
 // Use routes
 app.use("/api/ticket", ticketRoutes);
-// Backward-compatible alias for clients using plural path
-app.use("/api/tickets", ticketRoutes);
+app.use("/api/ticket/support-team", supportTeamRoutes);
 app.use("/api/email", emailRoutes);
 
 // Frappe compatible routes
@@ -171,209 +163,6 @@ app.use("/api/resource", ticketRoutes);
   try {
     // Subscribe to chat events
     await chatService.subscribeToChatEvents();
-
-    // Subscribe to user/role events via Redis
-    const redisClient = require('./config/redis');
-    // Ensure Redis is connected before subscribing (avoid race with adapter init)
-    async function waitForRedisReady(maxMs = 15000) {
-      const start = Date.now();
-      while (true) {
-        try {
-          if (
-            redisClient.pubClient && redisClient.pubClient.isOpen &&
-            redisClient.subClient && redisClient.subClient.isOpen &&
-            redisClient.userSubClient && redisClient.userSubClient.isOpen
-          ) {
-            return;
-          }
-        } catch (_) {}
-        if (Date.now() - start > maxMs) {
-          console.warn('⚠️ [Ticket Service] Redis not ready after wait, proceeding to subscribe anyway');
-          return;
-        }
-        await new Promise((r) => setTimeout(r, 250));
-      }
-    }
-    await waitForRedisReady();
-    const axios = require('axios');
-    const FRAPPE_API_URL = process.env.FRAPPE_API_URL || 'https://admin.sis.wellspring.edu.vn';
-    function buildFrappeHeaders() {
-      const headers = { 'Content-Type': 'application/json', Accept: 'application/json' };
-      if (process.env.FRAPPE_API_KEY && process.env.FRAPPE_API_SECRET) {
-        headers['Authorization'] = `token ${process.env.FRAPPE_API_KEY}:${process.env.FRAPPE_API_SECRET}`;
-        return headers;
-      }
-      if (process.env.FRAPPE_API_TOKEN) {
-        headers['Authorization'] = `Bearer ${process.env.FRAPPE_API_TOKEN}`;
-        headers['X-Frappe-CSRF-Token'] = process.env.FRAPPE_API_TOKEN;
-        return headers;
-      }
-      return headers;
-    }
-    const userChannel = process.env.REDIS_USER_CHANNEL || 'user_events';
-    // Subscribe on both primary Redis and optional Frappe Redis (if configured)
-    const subscribeFn = redisClient.subscribeMulti ? redisClient.subscribeMulti.bind(redisClient) : redisClient.subscribe.bind(redisClient);
-    await subscribeFn(userChannel, async (msg) => {
-      try {
-        const data = typeof msg === 'string' ? JSON.parse(msg) : msg;
-        if (!data || !data.type) return;
-        if (process.env.DEBUG_USER_EVENTS === '1') {
-          console.log('[Ticket Service] user_event received:', { type: data.type, hasUser: !!data.user, keys: Object.keys(data || {}) });
-        }
-        const Users = require('./models/Users');
-        switch (data.type) {
-          case 'user_created':
-          case 'user_updated': {
-            const u = data.user || data.data || {};
-            // Always-on concise log (even when DEBUG is off)
-            try {
-              const identifier = u.email || u.name || data.user_id || data.userId || 'unknown';
-              console.log(`[Ticket Service] user_event ${data.type}: ${identifier}`);
-            } catch (_) {}
-            // If only name provided, try fetch from Frappe to get email
-            if (!u.email && (u.name || data.user_id)) {
-              const userId = u.name || data.user_id;
-              try {
-                const resp = await axios.get(`${FRAPPE_API_URL}/api/resource/User/${userId}`, { headers: buildFrappeHeaders(), params: { fields: JSON.stringify(['name','email','full_name','user_image','enabled','department']) } });
-                Object.assign(u, resp.data?.data || {});
-              } catch {}
-            }
-            if (!u.email && !u.name) return;
-            // Upsert user + roles[]
-            const update = {
-              email: u.email,
-              fullname: u.full_name || u.fullname || u.name,
-              avatarUrl: u.user_image || '',
-              department: u.department || '',
-            };
-            // Derive active: prefer explicit 'enabled' from Frappe User, fallback to provided 'active', default true
-            try {
-              if (typeof u.enabled !== 'undefined') {
-                update.active = (u.enabled === 1 || u.enabled === true);
-                update.disabled = !update.active;
-              } else if (typeof u.active !== 'undefined') {
-                update.active = !!u.active;
-                update.disabled = !update.active;
-              }
-            } catch (_) {}
-            // Normalize roles to array of strings
-            try {
-              let rolesRaw = u.roles;
-              if (typeof rolesRaw === 'string') {
-                // Try strict JSON first
-                try {
-                  rolesRaw = JSON.parse(rolesRaw);
-                } catch {
-                  // Fallback: extract role names from string like "[ { role: 'Teacher' }, ... ]"
-                  const extracted = [];
-                  const regex = /role\s*:\s*['\"]([^'\"]+)['\"]/g;
-                  let match;
-                  while ((match = regex.exec(rolesRaw)) !== null) {
-                    extracted.push(match[1]);
-                  }
-                  rolesRaw = extracted;
-                }
-              }
-              if (Array.isArray(rolesRaw)) {
-                const normalized = rolesRaw
-                  .map((item) => {
-                    if (!item) return null;
-                    if (typeof item === 'string') return item;
-                    if (typeof item === 'object') return item.role || item.name || item.value || null;
-                    return null;
-                  })
-                  .filter((v) => typeof v === 'string' && v.trim().length > 0)
-                  .map((v) => v.trim());
-                if (normalized.length > 0) {
-                  // de-duplicate while preserving order
-                  update.roles = Array.from(new Set(normalized));
-                }
-              }
-            } catch (_) {
-              // ignore role normalization errors
-            }
-            await Users.findOneAndUpdate(
-              { email: u.email || u.name },
-              { $set: update },
-              { upsert: true, new: true }
-            );
-            try {
-              console.log(`[Ticket Service] user upserted: ${u.email || u.name}`);
-            } catch (_) {}
-            break;
-          }
-          case 'frappe_doc_event': {
-            // Generic ERP doc event adapter
-            const { doctype, event, doc } = data;
-             if (doctype === 'User' && doc) {
-              const email = doc.email || doc.name;
-              if (!email) break;
-              await Users.findOneAndUpdate(
-                { email },
-                {
-                  $set: {
-                    email,
-                    fullname: doc.full_name || doc.name,
-                    avatarUrl: doc.user_image || '',
-                    department: doc.department || '',
-                     active: doc.enabled === 1 || doc.enabled === true,
-                     disabled: !(doc.enabled === 1 || doc.enabled === true),
-                  },
-                },
-                { upsert: true, new: true }
-              );
-            }
-            if (doctype === 'Has Role' && doc) {
-              const email = doc.parent; // in Frappe, parent of Has Role is User.name (often email)
-              const role = doc.role;
-              if (!email || !role) break;
-              if (event === 'after_insert' || event === 'on_update' || data.action === 'assigned') {
-                await Users.updateOne({ email }, { $addToSet: { roles: role } });
-              } else if (event === 'on_trash' || data.action === 'removed' || data.deleted === true) {
-                await Users.updateOne({ email }, { $pull: { roles: role } });
-              }
-            }
-            break;
-          }
-          case 'user_role_assigned': {
-            const { email, role } = data;
-            if (!email || !role) return;
-            await Users.updateOne(
-              { email },
-              { $addToSet: { roles: role } }
-            );
-            break;
-          }
-          case 'user_role_removed': {
-            const { email, role } = data;
-            if (!email || !role) return;
-            await Users.updateOne(
-              { email },
-              { $pull: { roles: role } }
-            );
-            break;
-          }
-          default:
-            if (process.env.DEBUG_USER_EVENTS === '1') {
-              console.log('[Ticket Service] Unhandled user event type:', data.type);
-            }
-            break;
-        }
-      } catch (e) {
-        console.warn('⚠️ [Ticket Service] Error handling user event:', e.message);
-      }
-    });
-
-    // Optional: self-test publish to verify subscription path end-to-end
-    if (process.env.USER_EVENTS_SELF_TEST === '1') {
-      try {
-        const payload = { type: 'user_events_self_test', source: 'ticket-service', ts: new Date().toISOString() };
-        await redisClient.publish(userChannel, payload);
-        console.log('[Ticket Service] Published self-test event to', userChannel);
-      } catch (e) {
-        console.warn('[Ticket Service] Failed to publish self-test event:', e.message);
-      }
-    }
     console.log('✅ [Ticket Service] Services initialized successfully');
   } catch (error) {
     console.error('❌ [Ticket Service] Error initializing services:', error);
