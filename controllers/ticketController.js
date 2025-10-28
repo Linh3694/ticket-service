@@ -50,6 +50,18 @@ function buildFrappeHeaders() {
   return headers;
 }
 
+/**
+ * Ticket Category Mapping (EN -> VI)
+ */
+const TICKET_CATEGORY_LABELS = {
+  'Overall': 'Vấn đề chung',
+  'Camera': 'Hệ thống camera',
+  'Network': 'Hệ thống mạng',
+  'Bell System': 'Hệ thống chuông báo',
+  'Software': 'Hệ thống phần mềm',
+  'Account': 'Tài khoản'
+};
+
 // Helper: lấy user kỹ thuật ưu tiên từ DB local theo Frappe Role, fallback gọi Frappe
 async function getUsersByFrappeRole(roleName = 'IT Helpdesk', bearerToken = null) {
   try {
@@ -357,9 +369,9 @@ exports.getMyTickets = async (req, res) => {
       description: ticket.description,
       ticketCode: ticket.ticketCode,
       status: ticket.status || 'Assigned',
-      creator: ticket.creator?.fullname || req.user.fullname,
+      creator: ticket.creator,
       creatorEmail: req.user.email,
-      assignedTo: ticket.assignedTo?.fullname || null,
+      assignedTo: ticket.assignedTo || null,
       priority: ticket.priority || 'Normal',
       category: ticket.category || 'General',
       createdAt: ticket.createdAt,
@@ -1024,11 +1036,11 @@ exports.getTicketCategories = async (req, res) => {
       }
     });
 
-    // Convert to categories format
+    // Convert to categories format with Vietnamese labels
     const categories = Array.from(rolesSet).map(role => ({
       value: role,
-      label: role
-    })).sort((a, b) => a.label.localeCompare(b.label));
+      label: TICKET_CATEGORY_LABELS[role] || role // Use Vietnamese label or fallback to role name
+    })).sort((a, b) => a.label.localeCompare(b.label, 'vi'));
 
     console.log(`✅ [getTicketCategories] Found ${categories.length} categories`);
 
