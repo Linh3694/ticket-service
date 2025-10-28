@@ -55,7 +55,6 @@ async function assignTicketToUser(category) {
     console.log(`🔍 [assignTicket] Finding team member with role: ${category}`);
 
     // Tìm tất cả team member có role tương ứng
-    const SupportTeamMember = require('../models/SupportTeamMember');
     const teamMembers = await SupportTeamMember.find({
       roles: category,
       isActive: true
