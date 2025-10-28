@@ -12,10 +12,12 @@ const { authenticate } = require("../middleware/authMiddleware");
 // 2. Dynamic paths: /:userId (GET, PUT, DELETE)
 
 // Lấy danh sách available roles
-router.get("/roles", authenticate, supportTeamController.getAvailableRoles);
+// 🚨 TEMPORARILY DISABLED: remove authenticate middleware for debugging
+router.get("/roles", supportTeamController.getAvailableRoles);
 
 // Lấy danh sách Frappe users (PHẢI trước /:userId!)
-router.get("/frappe-users", authenticate, supportTeamController.getFrappeUsers);
+// 🚨 TEMPORARILY DISABLED: remove authenticate middleware for debugging
+router.get("/frappe-users", supportTeamController.getFrappeUsers);
 
 // Lấy members theo role
 router.get("/by-role/:role", authenticate, supportTeamController.getMembersByRole);
