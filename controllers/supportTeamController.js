@@ -76,21 +76,13 @@ async function getAllFrappeUsers(token) {
     
     console.log(`✅ [getAllFrappeUsers] Step 2: Fetched ${detailedUsers.length} enabled users (out of ${usersToFetch.length} checked)`);
     
-    // Step 3: Filter để loại bỏ những user không cần
-    // Ví dụ: Website User, Administrator, etc.
-    const filteredUsers = detailedUsers.filter(user => {
-      // Chỉ lấy Internal User hoặc System User
-      const validUserTypes = ['System User', 'Internal User'];
-      return validUserTypes.includes(user.user_type);
-    });
+    console.log(`✅ [getAllFrappeUsers] Step 3: Using all ${detailedUsers.length} enabled users`);
     
-    console.log(`✅ [getAllFrappeUsers] Step 3: After filtering by user_type: ${filteredUsers.length} users`);
-    
-    if (filteredUsers.length > 0) {
-      console.log('📝 [getAllFrappeUsers] Sample user:', JSON.stringify(filteredUsers[0], null, 2));
+    if (detailedUsers.length > 0) {
+      console.log('📝 [getAllFrappeUsers] Sample user:', JSON.stringify(detailedUsers[0], null, 2));
     }
     
-    return filteredUsers;
+    return detailedUsers;
   } catch (error) {
     console.error('❌ [getAllFrappeUsers] Error:', error.message);
     if (error.response?.data) {
