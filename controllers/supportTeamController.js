@@ -162,54 +162,30 @@ exports.getTeamMemberById = async (req, res) => {
 // Lấy danh sách users từ Frappe
 exports.getFrappeUsers = async (req, res) => {
   try {
-    // 🔓 PUBLIC endpoint - không yêu cầu authentication
-    // Nhưng vẫn cố lấy token từ request để call Frappe API nếu có
-    const token = req.header('Authorization')?.replace('Bearer ', '');
+    const User = require('../models/Users');
     
-    // ⚠️ Nếu không có token, vẫn cố gọi Frappe API với default header
-    // hoặc fallback method khác
-    let users = [];
+    // Users đã được synced từ Frappe via webhooks hoặc manual sync
+    console.log('🔍 [getFrappeUsers] Querying users from MongoDB...');
     
-    if (token) {
-      // Có token - gọi Frappe API như bình thường
-      users = await getAllFrappeUsers(token);
-    } else {
-      // Không có token - vẫn cố gọi với API token nếu config có
-      console.log('⚠️ [getFrappeUsers] No auth token provided, using default headers');
-      
-      // Fallback: sử dụng API key nếu có trong env
-      try {
-        const response = await axios.get(
-          `${FRAPPE_API_URL}/api/resource/User?fields=["name","full_name","email","user_image","department"]&limit_page_length=999`,
-          {
-            headers: {
-              'Authorization': process.env.FRAPPE_API_KEY && process.env.FRAPPE_API_SECRET 
-                ? `token ${process.env.FRAPPE_API_KEY}:${process.env.FRAPPE_API_SECRET}`
-                : '',
-              'Content-Type': 'application/json'
-            }
-          }
-        );
-        users = response.data.data || [];
-      } catch (fallbackErr) {
-        console.error('❌ Fallback API call failed:', fallbackErr.message);
-        users = [];
-      }
-    }
+    const users = await User.find({ 
+      active: true, 
+      disabled: false 
+    })
+      .sort({ fullname: 1 })
+      .limit(500)
+      .lean();  // Lean mode để performance tốt hơn
     
-    // Format users
-    const formattedUsers = users.map(user => {
-      // 🔍 Sử dụng full_name từ Frappe
-      const fullname = user.full_name || `${user.first_name || ''} ${user.last_name || ''}`.trim() || user.name;
-      
-      return {
-        userId: user.name,
-        fullname: fullname,
-        email: user.email,
-        avatarUrl: user.user_image || '',
-        department: user.location || ''  // Dùng location làm department
-      };
-    });
+    console.log(`✅ [getFrappeUsers] Found ${users.length} active users from MongoDB`);
+    
+    // Format users cho FE
+    const formattedUsers = users.map(user => ({
+      userId: user.email,  // Use email as unique identifier
+      fullname: user.fullname,
+      email: user.email,
+      avatarUrl: user.avatarUrl || '',
+      department: user.department || '',
+      roles: user.roles || []  // Include Frappe roles for reference
+    }));
     
     console.log(`📤 [getFrappeUsers] Returning ${formattedUsers.length} formatted users`);
     
@@ -218,7 +194,7 @@ exports.getFrappeUsers = async (req, res) => {
       data: { users: formattedUsers }
     });
   } catch (error) {
-    console.error('Error getting Frappe users:', error);
+    console.error('❌ Error getting users from MongoDB:', error);
     res.status(500).json({ 
       success: false, 
       message: error.message 
