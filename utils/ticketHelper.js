@@ -55,31 +55,42 @@ async function assignTicketToUser(category) {
     console.log(`🔍 [assignTicket] Finding team member with role: ${category}`);
 
     // Tìm tất cả team member có role tương ứng
+    const SupportTeamMember = require('../models/SupportTeamMember');
     const teamMembers = await SupportTeamMember.find({
       roles: category,
       isActive: true
     });
+
+    console.log(`   📋 Query: roles=${category}, isActive=true`);
+    console.log(`   ✅ Found ${teamMembers.length} team member(s)`);
 
     if (teamMembers.length === 0) {
       console.warn(`⚠️  [assignTicket] No team member found for role: ${category}`);
       return null;
     }
 
-    console.log(`   Found ${teamMembers.length} team member(s) with role: ${category}`);
+    teamMembers.forEach((m, i) => {
+      console.log(`   ${i + 1}. ${m.fullname} (${m.email}) - roles: ${m.roles.join(', ')}`);
+    });
 
     // Nếu chỉ có 1 người, assign cho họ
     if (teamMembers.length === 1) {
-      console.log(`✅ [assignTicket] Assigned to: ${teamMembers[0].fullname}`);
-      return teamMembers[0]._id;
+      const assignedMember = teamMembers[0];
+      console.log(`✅ [assignTicket] Assigned to: ${assignedMember.fullname} (only 1 member)`);
+      console.log(`   Member ID: ${assignedMember._id}`);
+      return assignedMember._id;
     }
 
     // Nếu có nhiều người, tìm người có ít ticket nhất (load balancing)
+    console.log(`   🔄 Load balancing: counting tickets for each member...`);
     const memberStats = await Promise.all(
       teamMembers.map(async (member) => {
+        const Ticket = require('../models/Ticket');
         const ticketCount = await Ticket.countDocuments({
           assignedTo: member._id,
-          status: { $in: ['Assigned', 'Processing'] } // Chỉ count ticket chưa hoàn thành
+          status: { $in: ['Assigned', 'Processing'] }
         });
+        console.log(`   - ${member.fullname}: ${ticketCount} active tickets`);
         return { memberId: member._id, name: member.fullname, ticketCount };
       })
     );
@@ -89,9 +100,11 @@ async function assignTicketToUser(category) {
 
     const selected = memberStats[0];
     console.log(`✅ [assignTicket] Assigned to: ${selected.name} (${selected.ticketCount} active tickets)`);
+    console.log(`   Member ID: ${selected.memberId}`);
     return selected.memberId;
   } catch (error) {
     console.error('❌ Error assigning ticket:', error.message);
+    console.error('   Stack:', error.stack);
     return null;
   }
 }
