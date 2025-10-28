@@ -14,12 +14,16 @@ const { authenticate } = require("../middleware/authMiddleware");
 // 📖 PUBLIC Endpoints (No Authentication Required)
 // - /roles: Danh sách các role hỗ trợ
 // - /frappe-users: Danh sách tất cả user từ Frappe để chọn
+// - /debug/frappe-users: DEBUG - xem raw response từ Frappe
 
 // Lấy danh sách available roles (PUBLIC)
 router.get("/roles", supportTeamController.getAvailableRoles);
 
 // Lấy danh sách Frappe users (PUBLIC - để searchable combobox)
 router.get("/frappe-users", supportTeamController.getFrappeUsers);
+
+// DEBUG: Xem raw response từ Frappe
+router.get("/debug/frappe-users", supportTeamController.debugFrappeUsers);
 
 // Lấy members theo role (AUTHENTICATED)
 router.get("/by-role/:role", authenticate, supportTeamController.getMembersByRole);
