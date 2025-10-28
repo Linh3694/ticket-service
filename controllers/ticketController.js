@@ -213,6 +213,11 @@ exports.createTicket = async (req, res) => {
     console.log(`   Assigned to: ${assignedToId || 'None'}`);
 
     // 3️⃣ Create ticket
+    console.log(`🔧 [createTicket] Creating ticket with:`);
+    console.log(`   assignedToId: ${assignedToId}`);
+    console.log(`   assignedToId type: ${typeof assignedToId}`);
+    console.log(`   assignedToId || undefined: ${assignedToId || 'undefined'}`);
+    
     const newTicket = new Ticket({
       ticketCode,
       title: title.trim(),
@@ -229,8 +234,15 @@ exports.createTicket = async (req, res) => {
       })) : []
     });
 
+    console.log(`🔧 [createTicket] After new Ticket():`);
+    console.log(`   newTicket.assignedTo: ${newTicket.assignedTo}`);
+    console.log(`   newTicket.assignedTo type: ${typeof newTicket.assignedTo}`);
+    
     await newTicket.save();
     console.log(`✅ [createTicket] Ticket created: ${newTicket._id}`);
+    
+    console.log(`🔧 [createTicket] After save():`);
+    console.log(`   newTicket.assignedTo: ${newTicket.assignedTo}`);
 
     // 4️⃣ Log history
     await logTicketHistory(
