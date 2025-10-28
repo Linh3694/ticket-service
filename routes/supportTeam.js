@@ -43,18 +43,12 @@ router.put("/:userId/roles", authenticate, supportTeamController.updateTeamMembe
 // Cập nhật stats của member (AUTHENTICATED)
 router.put("/:userId/stats", authenticate, supportTeamController.updateMemberStats);
 
-// Xóa team member (AUTHENTICATED)
+// Xóa team member (soft delete)
 router.delete("/:userId", authenticate, supportTeamController.deleteTeamMember);
 
-// 🔔 WEBHOOK: Nhận cập nhật từ Frappe khi user thay đổi (NO AUTH)
-// Frappe sẽ gửi POST request tới endpoint này
-router.post("/webhook/frappe-user-changed", supportTeamController.webhookUserChanged);
-
-// 🔄 MANUAL SYNC: Đồng bộ user từ Frappe (AUTHENTICATED)
-router.post("/sync/frappe-users", authenticate, supportTeamController.syncUsersFromFrappe);
-
-// 🧪 TEST: Test webhook format (NO AUTH)
-router.post("/webhook/test", supportTeamController.webhookTest);
+// ⚠️ Webhooks đã move sang userController
+// - POST /api/ticket/user/webhook/frappe-user-changed
+// Để tránh duplicate/confusing
 
 module.exports = router;
 
