@@ -9,6 +9,7 @@ const uploadMessage = require("../middleware/uploadMessage");
 router.post("/", authenticate, upload.array("attachments", 15), ticketController.createTicket);
 router.get("/technical-stats/:userId", ticketController.getTechnicalStats);
 router.get("/support-team", ticketController.getSupportTeam);
+router.get("/my-tickets", authenticate, ticketController.getMyTickets);
 router.get("/", authenticate, ticketController.getTickets);
 router.get("/me", authenticate, ticketController.getMe);
 router.get("/:ticketId", authenticate, ticketController.getTicketById);
