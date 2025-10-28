@@ -11,6 +11,7 @@ const uploadMessage = require("../middleware/uploadMessage");
 // Static routes
 router.post("/", authenticate, upload.array("attachments", 15), ticketController.createTicket);
 router.get("/categories", ticketController.getTicketCategories);
+router.get("/debug/team-members", authenticate, ticketController.debugTeamMembers);
 router.get("/technical-stats/:userId", ticketController.getTechnicalStats);
 router.get("/support-team", ticketController.getSupportTeam);
 router.post("/support-team/add-user", ticketController.addUserToSupportTeam);
