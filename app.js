@@ -153,6 +153,7 @@ app.get('/health', async (req, res) => {
 const ticketRoutes = require('./routes/tickets');
 const emailRoutes = require('./routes/emailRoutes');
 const supportTeamRoutes = require('./routes/supportTeam');
+const userRoutes = require('./routes/user');
 
 // Import services
 const notificationService = require('./services/notificationService');
@@ -160,6 +161,7 @@ const notificationService = require('./services/notificationService');
 // Use routes
 app.use("/api/ticket", ticketRoutes);
 app.use("/api/ticket/support-team", supportTeamRoutes);
+app.use("/api/ticket/user", userRoutes);
 app.use("/api/email", emailRoutes);
 
 // Frappe compatible routes

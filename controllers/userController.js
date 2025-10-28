@@ -1,0 +1,353 @@
+const axios = require('axios');
+
+const FRAPPE_API_URL = process.env.FRAPPE_API_URL || 'https://admin.sis.wellspring.edu.vn';
+
+// Fetch user details từ Frappe
+async function getFrappeUserDetail(userEmail, token) {
+  try {
+    const response = await axios.get(
+      `${FRAPPE_API_URL}/api/resource/User/${userEmail}`,
+      {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'X-Frappe-CSRF-Token': token
+        }
+      }
+    );
+    return response.data.data;
+  } catch (error) {
+    console.warn(`⚠️  Failed to fetch user ${userEmail}: ${error.message}`);
+    return null;
+  }
+}
+
+// Fetch all users từ Frappe
+async function getAllFrappeUsers(token) {
+  try {
+    console.log('🔍 [Sync] Fetching all Frappe users...');
+    
+    const listResponse = await axios.get(
+      `${FRAPPE_API_URL}/api/resource/User`,
+      {
+        params: {
+          limit_page_length: 5000,
+          order_by: 'name asc'
+        },
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'X-Frappe-CSRF-Token': token
+        }
+      }
+    );
+    
+    let userList = listResponse.data.data || [];
+    console.log(`✅ Found ${userList.length} users in Frappe`);
+    
+    // Fetch chi tiết từng user (max 100)
+    console.log(`🔍 Fetching details for top 100 users...`);
+    const detailedUsers = [];
+    
+    for (const userItem of userList.slice(0, 100)) {
+      try {
+        const frappe_user = await getFrappeUserDetail(userItem.name, token);
+        
+        if (frappe_user && frappe_user.enabled === 1) {
+          detailedUsers.push(frappe_user);
+        }
+      } catch (err) {
+        console.warn(`⚠️  Failed to fetch user ${userItem.name}`);
+      }
+    }
+    
+    console.log(`✅ Fetched ${detailedUsers.length} enabled users`);
+    return detailedUsers;
+  } catch (error) {
+    console.error('❌ Error fetching Frappe users:', error.message);
+    return [];
+  }
+}
+
+// Format Frappe user → Users model
+function formatFrappeUser(frappeUser) {
+  const frappe_roles = frappeUser.roles?.map(r => r.role) || [];
+  
+  return {
+    email: frappeUser.email,
+    fullname: frappeUser.full_name || frappeUser.name,
+    avatarUrl: frappeUser.user_image || '',
+    department: frappeUser.location || '',
+    provider: 'frappe',
+    disabled: frappeUser.enabled !== 1,
+    active: frappeUser.enabled === 1,
+    roles: frappe_roles,  // 🔴 Frappe system roles
+    microsoftId: frappeUser.name  // Store Frappe name as reference
+  };
+}
+
+// ✅ ENDPOINT 1: Auto sync all users
+exports.syncAllUsers = async (req, res) => {
+  try {
+    const token = req.header('Authorization')?.replace('Bearer ', '');
+    
+    if (!token) {
+      return res.status(401).json({
+        success: false,
+        message: 'Token required for sync'
+      });
+    }
+    
+    const User = require('../models/Users');
+    
+    console.log('🔄 [Auto Sync] Starting...');
+    const frappeUsers = await getAllFrappeUsers(token);
+    
+    let synced = 0;
+    let failed = 0;
+    const syncedUsers = [];
+    
+    for (const frappeUser of frappeUsers) {
+      try {
+        const userData = formatFrappeUser(frappeUser);
+        
+        const result = await User.findOneAndUpdate(
+          { email: frappeUser.email },
+          userData,
+          { upsert: true, new: true }
+        );
+        
+        syncedUsers.push({
+          email: result.email,
+          fullname: result.fullname,
+          roles: result.roles
+        });
+        synced++;
+      } catch (err) {
+        console.error(`❌ Failed to sync ${frappeUser.email}: ${err.message}`);
+        failed++;
+      }
+    }
+    
+    console.log(`✅ [Auto Sync] Complete: ${synced} synced, ${failed} failed`);
+    
+    res.status(200).json({
+      success: true,
+      message: 'Auto sync completed',
+      stats: {
+        synced,
+        failed,
+        total: synced + failed
+      },
+      synced_users: syncedUsers
+    });
+  } catch (error) {
+    console.error('❌ [Auto Sync] Error:', error.message);
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+};
+
+// ✅ ENDPOINT 2: Manual sync all
+exports.syncUsersManual = async (req, res) => {
+  try {
+    const token = req.header('Authorization')?.replace('Bearer ', '');
+    
+    if (!token) {
+      return res.status(401).json({
+        success: false,
+        message: 'Token required'
+      });
+    }
+    
+    const User = require('../models/Users');
+    
+    console.log('📝 [Manual Sync] Starting...');
+    const frappeUsers = await getAllFrappeUsers(token);
+    
+    let synced = 0;
+    let failed = 0;
+    
+    for (const frappeUser of frappeUsers) {
+      try {
+        const userData = formatFrappeUser(frappeUser);
+        
+        await User.findOneAndUpdate(
+          { email: frappeUser.email },
+          userData,
+          { upsert: true, new: true }
+        );
+        synced++;
+      } catch (err) {
+        console.error(`❌ Failed: ${frappeUser.email}`);
+        failed++;
+      }
+    }
+    
+    console.log(`✅ [Manual Sync] Complete: ${synced} synced, ${failed} failed`);
+    
+    res.status(200).json({
+      success: true,
+      message: 'Manual sync completed',
+      stats: { synced, failed }
+    });
+  } catch (error) {
+    console.error('❌ Error:', error.message);
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+};
+
+// ✅ ENDPOINT 3: Sync user by email
+exports.syncUserByEmail = async (req, res) => {
+  try {
+    const { email } = req.params;
+    const token = req.header('Authorization')?.replace('Bearer ', '');
+    
+    if (!token) {
+      return res.status(401).json({
+        success: false,
+        message: 'Token required'
+      });
+    }
+    
+    if (!email) {
+      return res.status(400).json({
+        success: false,
+        message: 'Email parameter required'
+      });
+    }
+    
+    const User = require('../models/Users');
+    
+    console.log(`📧 [Sync Email] Syncing user: ${email}`);
+    
+    const frappeUser = await getFrappeUserDetail(email, token);
+    
+    if (!frappeUser) {
+      return res.status(404).json({
+        success: false,
+        message: `User not found in Frappe: ${email}`
+      });
+    }
+    
+    if (frappeUser.enabled !== 1) {
+      return res.status(400).json({
+        success: false,
+        message: `User is disabled in Frappe: ${email}`
+      });
+    }
+    
+    const userData = formatFrappeUser(frappeUser);
+    
+    const result = await User.findOneAndUpdate(
+      { email: frappeUser.email },
+      userData,
+      { upsert: true, new: true }
+    );
+    
+    console.log(`✅ [Sync Email] User synced: ${email}`);
+    
+    res.status(200).json({
+      success: true,
+      message: 'User synced successfully',
+      user: {
+        email: result.email,
+        fullname: result.fullname,
+        roles: result.roles,
+        department: result.department,
+        avatarUrl: result.avatarUrl
+      }
+    });
+  } catch (error) {
+    console.error('❌ Error:', error.message);
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+};
+
+// ✅ ENDPOINT 4: Webhook - User changed in Frappe
+exports.webhookUserChanged = async (req, res) => {
+  try {
+    const { doc, event } = req.body;
+    
+    if (!doc || !doc.name) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid webhook payload'
+      });
+    }
+    
+    const User = require('../models/Users');
+    
+    console.log(`🔔 [Webhook] User ${event}: ${doc.name}`);
+    
+    if (event === 'delete') {
+      // Xoá user khỏi local DB
+      console.log(`🗑️  Deleting user: ${doc.name}`);
+      await User.deleteOne({ email: doc.email });
+      
+      return res.status(200).json({
+        success: true,
+        message: 'User deleted'
+      });
+    }
+    
+    if (event === 'insert' || event === 'update') {
+      // Chỉ sync enabled users
+      if (doc.enabled !== 1) {
+        console.log(`⏭️  Skipping disabled user: ${doc.name}`);
+        return res.status(200).json({
+          success: true,
+          message: 'User is disabled, skipped'
+        });
+      }
+      
+      const frappe_roles = doc.roles?.map(r => r.role) || [];
+      
+      const userData = {
+        email: doc.email,
+        fullname: doc.full_name || doc.name,
+        avatarUrl: doc.user_image || '',
+        department: doc.location || '',
+        provider: 'frappe',
+        disabled: false,
+        active: true,
+        roles: frappe_roles
+      };
+      
+      const result = await User.findOneAndUpdate(
+        { email: doc.email },
+        userData,
+        { upsert: true, new: true }
+      );
+      
+      console.log(`✅ [Webhook] User synced: ${doc.name} (roles: ${frappe_roles.join(', ')})`);
+      
+      return res.status(200).json({
+        success: true,
+        message: `User ${event} synced`,
+        user: {
+          email: result.email,
+          fullname: result.fullname,
+          roles: result.roles
+        }
+      });
+    }
+    
+    res.status(200).json({
+      success: true,
+      message: 'Unknown event, ignored'
+    });
+  } catch (error) {
+    console.error('❌ [Webhook] Error:', error.message);
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+};
