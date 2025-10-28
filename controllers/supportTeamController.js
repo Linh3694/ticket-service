@@ -23,15 +23,40 @@ async function getFrappeUser(userId, token) {
 // Helper function to get all users from Frappe
 async function getAllFrappeUsers(token) {
   try {
-    const response = await axios.get(`${FRAPPE_API_URL}/api/resource/User?fields=["name","full_name","email","user_image","department"]&limit_page_length=999`, {
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'X-Frappe-CSRF-Token': token
+    // 🔍 Lấy tất cả users với pagination để đảm bảo lấy hết
+    const fields = JSON.stringify(['name', 'full_name', 'email', 'user_image', 'department', 'enabled', 'first_name', 'last_name']);
+    
+    // Cách 1: Cố lấy nhiều users cùng lúc
+    const response = await axios.get(
+      `${FRAPPE_API_URL}/api/resource/User`,
+      {
+        params: {
+          fields: fields,
+          limit_page_length: 5000,  // 🔼 Tăng lên 5000 thay vì 999
+          order_by: 'name asc'  // Sắp xếp để consistent
+        },
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'X-Frappe-CSRF-Token': token,
+          'Content-Type': 'application/json'
+        }
       }
-    });
-    return response.data.data || [];
+    );
+    
+    let users = response.data.data || [];
+    console.log(`✅ [getAllFrappeUsers] Loaded ${users.length} users from Frappe`);
+    
+    // 🔍 Log sample user để kiểm tra fields
+    if (users.length > 0) {
+      console.log('📝 [getAllFrappeUsers] Sample user:', JSON.stringify(users[0], null, 2));
+    }
+    
+    return users;
   } catch (error) {
-    console.error('Error getting users from Frappe:', error);
+    console.error('❌ [getAllFrappeUsers] Error:', error.message);
+    if (error.response?.data) {
+      console.error('Response data:', error.response.data);
+    }
     return [];
   }
 }
@@ -142,13 +167,28 @@ exports.getFrappeUsers = async (req, res) => {
     }
     
     // Format users
-    const formattedUsers = users.map(user => ({
-      userId: user.name,
-      fullname: user.full_name || user.name,
-      email: user.email,
-      avatarUrl: user.user_image || '',
-      department: user.department || ''
-    }));
+    const formattedUsers = users.map(user => {
+      // 🔍 Xử lý full_name: ưu tiên full_name, fallback to first_name + last_name hoặc name
+      let fullname = user.full_name || '';
+      
+      if (!fullname && (user.first_name || user.last_name)) {
+        fullname = `${user.first_name || ''} ${user.last_name || ''}`.trim();
+      }
+      
+      if (!fullname) {
+        fullname = user.name;  // Fallback cuối cùng
+      }
+      
+      return {
+        userId: user.name,
+        fullname: fullname,
+        email: user.email,
+        avatarUrl: user.user_image || '',
+        department: user.department || ''
+      };
+    });
+    
+    console.log(`📤 [getFrappeUsers] Returning ${formattedUsers.length} formatted users`);
     
     res.status(200).json({ 
       success: true,
