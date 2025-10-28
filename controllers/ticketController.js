@@ -357,8 +357,7 @@ exports.getMyTickets = async (req, res) => {
       .populate({
         path: 'assignedTo',
         select: 'fullname email avatarUrl'
-      })
-      .lean();
+      });
     
     console.log(`✅ [getMyTickets] Found ${tickets.length} tickets for user ${req.user.email}`);
     
