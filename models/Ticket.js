@@ -25,10 +25,15 @@ const ticketSchema = new mongoose.Schema(
       },
       title: String,
       description: String,
+      category: {
+        type: String,
+        enum: ["Overall", "Camera", "Network", "Bell System", "Software", "Account"],
+        required: true,
+      },
       priority: {
         type: String,
         enum: ["Low", "Medium", "High", "Urgent"],
-        default: "Low",
+        default: "Medium",
       },
       status: {
         type: String,
@@ -38,6 +43,11 @@ const ticketSchema = new mongoose.Schema(
       creator: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
       assignedTo: { type: mongoose.Schema.Types.ObjectId, ref: "User" }, // Nhân viên hỗ trợ
      
+      // 📝 Timeline tracking
+      createdAt: { type: Date, default: Date.now },
+      updatedAt: { type: Date, default: Date.now },
+      acceptedAt: { type: Date }, // Thời điểm nhân viên tiếp nhận
+      closedAt: { type: Date }, // Thời điểm đóng ticket
       
       sla: {
         type: Date, // Hạn chót (deadline) dựa trên priority

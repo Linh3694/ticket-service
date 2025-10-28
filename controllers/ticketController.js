@@ -172,28 +172,98 @@ function translateStatus(status) {
 // a) Tạo ticket
 exports.createTicket = async (req, res) => {
   try {
-    const { title, description, priority, creator, notes } = req.body;
+    console.log('🎫 [createTicket] Starting ticket creation...');
+    console.log('   Body:', JSON.stringify(req.body, null, 2));
 
-    // Try to reuse current user's token to fetch IT Helpdesk list if needed
-    const bearerToken = (req.headers['authorization'] || '').replace('Bearer ', '').trim() || null;
+    const { title, description, category, notes } = req.body;
+    const userId = req.user._id;
 
-    const newTicket = await createTicketHelper({
-      title,
-      description,
-      priority,
-      creatorId: creator,
-      fallbackCreatorId: req.user?._id,
-      bearerToken,
-      files: req.files || [],
+    // Validation
+    if (!title?.trim()) {
+      return res.status(400).json({ success: false, message: 'Tiêu đề không được để trống' });
+    }
+    if (!description?.trim()) {
+      return res.status(400).json({ success: false, message: 'Mô tả chi tiết không được để trống' });
+    }
+    if (!category) {
+      return res.status(400).json({ success: false, message: 'Hạng mục không được để trống' });
+    }
+
+    // Import helper functions
+    const { generateTicketCode, assignTicketToUser, logTicketHistory } = require('../utils/ticketHelper');
+
+    // 1️⃣ Generate ticket code
+    const ticketCode = await generateTicketCode(category);
+    console.log(`   Generated code: ${ticketCode}`);
+
+    // 2️⃣ Auto-assign to team member with matching role
+    const assignedToId = await assignTicketToUser(category);
+    console.log(`   Assigned to: ${assignedToId || 'None'}`);
+
+    // 3️⃣ Create ticket
+    const newTicket = new Ticket({
+      ticketCode,
+      title: title.trim(),
+      description: description.trim(),
+      category,
+      creator: userId,
+      assignedTo: assignedToId || undefined,
+      priority: 'Medium', // Default priority
+      status: 'Assigned',
+      notes: notes?.trim() || '',
+      attachments: req.files ? req.files.map(file => ({
+        filename: file.originalname,
+        url: file.path || file.filename
+      })) : []
     });
-    newTicket.notes = notes || "";
+
     await newTicket.save();
+    console.log(`✅ [createTicket] Ticket created: ${newTicket._id}`);
 
-    // Gửi thông báo đến admin và technical
-    await notificationService.sendNewTicketNotification(newTicket);
+    // 4️⃣ Log history
+    await logTicketHistory(
+      newTicket._id,
+      `Ticket created by ${req.user.fullname || req.user.email}`,
+      userId
+    );
 
-    res.status(201).json({ success: true, ticket: newTicket });
+    if (assignedToId) {
+      await logTicketHistory(
+        newTicket._id,
+        `Auto-assigned to support team member`,
+        userId
+      );
+    }
+
+    // 5️⃣ Send notification
+    try {
+      await notificationService.sendNewTicketNotification(newTicket);
+    } catch (notifyError) {
+      console.warn('⚠️  Error sending notification:', notifyError.message);
+    }
+
+    // Populate creator and assignedTo for response
+    await newTicket.populate('creator assignedTo', 'fullname email avatarUrl');
+
+    res.status(201).json({
+      success: true,
+      data: {
+        _id: newTicket._id,
+        ticketCode: newTicket.ticketCode,
+        title: newTicket.title,
+        description: newTicket.description,
+        category: newTicket.category,
+        status: newTicket.status,
+        priority: newTicket.priority,
+        creator: newTicket.creator,
+        assignedTo: newTicket.assignedTo,
+        notes: newTicket.notes,
+        createdAt: newTicket.createdAt,
+        updatedAt: newTicket.updatedAt
+      }
+    });
   } catch (error) {
+    console.error('❌ Error in createTicket:', error);
     res.status(500).json({ success: false, message: error.message });
   }
 };
@@ -342,81 +412,94 @@ exports.getTicketById = async (req, res) => {
 exports.updateTicket = async (req, res) => {
   const { ticketId } = req.params;
   const updates = req.body;
-  const userId = req.user.id;
+  const userId = req.user._id;
 
   try {
+    console.log('📝 [updateTicket] Updating ticket:', ticketId);
+    console.log('   Updates:', JSON.stringify(updates, null, 2));
+
     const ticket = await Ticket.findById(ticketId)
-      .populate('creator')
-      .populate('assignedTo');
+      .populate('creator assignedTo');
 
     if (!ticket) {
       return res.status(404).json({ success: false, message: "Ticket không tồn tại" });
     }
 
+    // Check permission: only creator or assignedTo can update
+    if (!ticket.creator.equals(userId) && (!ticket.assignedTo || !ticket.assignedTo.equals(userId)) && req.user.role !== 'admin') {
+      return res.status(403).json({ success: false, message: "Bạn không có quyền chỉnh sửa ticket này" });
+    }
+
     const previousStatus = ticket.status;
-    const previousAssignedTo = ticket.assignedTo;
 
-    console.log("Ticket hiện tại:", ticket);
-    console.log("Received updates:", updates);
-
+    // 📝 Log status change
     if (updates.status && updates.status !== ticket.status) {
       ticket.history.push({
         timestamp: new Date(),
-        action: `<strong>${req.user.fullname}</strong> đã thay đổi trạng thái ticket từ <strong>"${translateStatus(ticket.status)}"</strong> sang <strong>"${translateStatus(updates.status)}"</strong>`,
-        user: req.user._id, // luôn là ObjectId từ middleware
+        action: `Status changed from "${previousStatus}" to "${updates.status}"`,
+        user: userId
       });
+
+      // Set acceptedAt khi status chuyển sang "Processing"
+      if (updates.status === "Processing" && !ticket.acceptedAt) {
+        ticket.acceptedAt = new Date();
+      }
+
+      // Set closedAt khi status chuyển sang "Closed" hoặc "Done"
+      if ((updates.status === "Closed" || updates.status === "Done") && !ticket.closedAt) {
+        ticket.closedAt = new Date();
+      }
     }
 
-    if (updates.status === "Cancelled" && updates.cancelReason) {
+    // 📝 Log other field changes
+    if (updates.title && updates.title !== ticket.title) {
       ticket.history.push({
         timestamp: new Date(),
-        action: ` <strong>${req.user.fullname}</strong> đã huỷ ticket với lý do: <strong>"${updates.cancelReason}"</strong>`,
-        user: req.user._id,
+        action: `Title updated`,
+        user: userId
       });
     }
 
+    if (updates.description && updates.description !== ticket.description) {
+      ticket.history.push({
+        timestamp: new Date(),
+        action: `Description updated`,
+        user: userId
+      });
+    }
+
+    // Update fields
     Object.assign(ticket, updates);
-
-    if (updates.status === "Processing") {
-      const slaDurations = { Low: 72, Medium: 48, High: 24, Urgent: 4 };
-      const priority = updates.priority || ticket.priority;
-      let slaDeadline = new Date();
-      slaDeadline.setHours(slaDeadline.getHours() + slaDurations[priority]);
-      ticket.sla = slaDeadline;
-      ticket.history.push({
-        timestamp: new Date(),
-        action: ` <strong>${req.user.fullname}</strong> đã chuyển ticket sang <strong>"Đang xử lý"</strong> `,
-        user: req.user._id,
-      });
-    }
+    ticket.updatedAt = new Date();
 
     await ticket.save();
-    console.log("Ticket đã được lưu thành công:", ticket);
+    console.log(`✅ [updateTicket] Ticket updated: ${ticketId}`);
 
-    let action = 'updated';
-    if (req.body.status && ticket.status !== previousStatus) {
-      if (req.body.notifyAction) {
-        action = req.body.notifyAction;
-      } else {
-        action = 'status_updated';
+    // Populate for response
+    await ticket.populate('creator assignedTo', 'fullname email avatarUrl');
+
+    res.status(200).json({
+      success: true,
+      data: {
+        _id: ticket._id,
+        ticketCode: ticket.ticketCode,
+        title: ticket.title,
+        description: ticket.description,
+        category: ticket.category,
+        status: ticket.status,
+        priority: ticket.priority,
+        creator: ticket.creator,
+        assignedTo: ticket.assignedTo,
+        notes: ticket.notes,
+        createdAt: ticket.createdAt,
+        updatedAt: ticket.updatedAt,
+        acceptedAt: ticket.acceptedAt,
+        closedAt: ticket.closedAt
       }
-    } else if (req.body.assignedTo && !previousAssignedTo.equals(ticket.assignedTo)) {
-      action = 'assigned';
-    }
-
-    await notificationService.sendTicketUpdateNotification(ticket, action);
-
-    if (action === 'feedback_added' && ticket.feedback) {
-      await notificationService.sendFeedbackNotification(ticket);
-    }
-
-    res.status(200).json({ success: true, ticket });
-  } catch (error) {
-    console.error("Lỗi khi cập nhật ticket:", error);
-    res.status(500).json({
-      success: false,
-      message: "Đã xảy ra lỗi khi cập nhật ticket",
     });
+  } catch (error) {
+    console.error('❌ Error in updateTicket:', error);
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 
@@ -921,182 +1004,48 @@ exports.removeUserFromSupportTeam = async (req, res) => {
   }
 };
 
+/**
+ * Lấy danh sách hạng mục ticket (categories)
+ * Trả về tất cả roles từ support team members
+ */
+exports.getTicketCategories = async (req, res) => {
+  try {
+    console.log('🔍 [getTicketCategories] Fetching ticket categories...');
+
+    // Lấy unique roles từ Support Team members
+    const SupportTeamMember = require('../models/SupportTeamMember');
+    const teamMembers = await SupportTeamMember.find({ isActive: true }).select('roles');
+
+    // Tập hợp tất cả unique roles
+    const rolesSet = new Set();
+    teamMembers.forEach(member => {
+      if (Array.isArray(member.roles)) {
+        member.roles.forEach(role => rolesSet.add(role));
+      }
+    });
+
+    // Convert to categories format
+    const categories = Array.from(rolesSet).map(role => ({
+      value: role,
+      label: role
+    })).sort((a, b) => a.label.localeCompare(b.label));
+
+    console.log(`✅ [getTicketCategories] Found ${categories.length} categories`);
+
+    res.status(200).json({
+      success: true,
+      data: categories
+    });
+  } catch (error) {
+    console.error('❌ Error in getTicketCategories:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+};
+
 // Helper function to create ticket
-async function createTicketHelper({ title, description, creatorId, fallbackCreatorId = null, priority, files = [], bearerToken = null }) {
-  try {
-    const { ticketId } = req.params;
-    const userId = req.user._id;
-
-    // Tìm ticket
-    const ticket = await Ticket.findById(ticketId);
-    if (!ticket) {
-      return res.status(404).json({ success: false, message: "Ticket không tồn tại" });
-    }
-
-    // Kiểm tra quyền truy cập ticket - superadmin có thể xem tất cả
-    const hasAccess = ticket.creator.equals(userId) || 
-                     (ticket.assignedTo && ticket.assignedTo.equals(userId)) ||
-                     req.user.role === "admin" || 
-                     req.user.role === "superadmin";
-
-    if (!hasAccess) {
-      return res.status(403).json({ success: false, message: "Bạn không có quyền truy cập ticket này" });
-    }
-
-    // Lấy group chat (nếu chưa có, trả về hasGroup=false để client hiển thị nút tạo)
-    if (!ticket.groupChatId) {
-      return res.status(200).json({ success: true, hasGroup: false, canCreate: true, message: "Ticket chưa có group chat" });
-    }
-
-    // Gọi chat-service để lấy chi tiết group chat
-    const CHAT_BASE = process.env.CHAT_SERVICE_URL || process.env.CHAT_SERVICE_PUBLIC_URL || FRAPPE_API_URL;
-    try {
-      const chatResp = await axios.get(`${CHAT_BASE}/api/chats/${ticket.groupChatId}`, {
-        headers: {
-          Authorization: req.headers['authorization'] || '',
-          'X-Service-Token': process.env.CHAT_INTERNAL_TOKEN || process.env.INTERNAL_SERVICE_TOKEN || ''
-        }
-      });
-      const groupChat = chatResp.data;
-
-      // Kiểm tra user có trong group chat không
-      const isParticipant = Array.isArray(groupChat.participants)
-        && groupChat.participants.some((p) => (p._id || p).toString() === userId.toString());
-
-      if (!isParticipant && req.user.role !== "admin" && req.user.role !== "superadmin") {
-        // Thử auto-join nếu là creator/assigned
-        const isCreatorOrAssigned = ticket.creator.equals(userId) || (ticket.assignedTo && ticket.assignedTo.equals(userId));
-        if (isCreatorOrAssigned) {
-          try {
-            await axios.post(`${CHAT_BASE}/api/chats/${ticket.groupChatId}/add-user`, { user_id: userId }, {
-              headers: {
-                Authorization: req.headers['authorization'] || '',
-                'X-Service-Token': process.env.CHAT_INTERNAL_TOKEN || process.env.INTERNAL_SERVICE_TOKEN || ''
-              }
-            });
-            // Refetch as participant
-            const refetch = await axios.get(`${CHAT_BASE}/api/chats/${ticket.groupChatId}`, {
-              headers: {
-                Authorization: req.headers['authorization'] || '',
-                'X-Service-Token': process.env.CHAT_INTERNAL_TOKEN || process.env.INTERNAL_SERVICE_TOKEN || ''
-              }
-            });
-            const joinedChat = refetch.data;
-            return res.status(200).json({
-              success: true,
-              hasGroup: true,
-              groupChat: joinedChat,
-              isParticipant: true,
-              canJoin: true,
-            });
-          } catch (_) {
-            // fallthrough to 403 below
-          }
-        }
-        return res.status(403).json({ success: false, message: "Bạn không có quyền truy cập group chat này" });
-      }
-
-      return res.status(200).json({
-        success: true,
-        hasGroup: true,
-        groupChat,
-        isParticipant,
-        canJoin: req.user.role === "admin" || req.user.role === "superadmin" || isParticipant,
-      });
-    } catch (e) {
-      // Nếu chat-service trả về 404, cleanup groupChatId ở ticket
-      if (e.response?.status === 404) {
-        console.log(`⚠️ Ticket ${ticket.ticketCode} có groupChatId nhưng chat không tồn tại ở chat-service, đang cleanup`);
-        await Ticket.findByIdAndUpdate(ticketId, { $unset: { groupChatId: 1 } });
-        return res.status(404).json({ success: false, message: "Group chat không tồn tại" });
-      }
-      // Nếu 403, thử auto-join (khi user là creator/assigned) rồi trả lại
-      if (e.response?.status === 403) {
-        const isCreatorOrAssigned = ticket.creator.equals(userId) || (ticket.assignedTo && ticket.assignedTo.equals(userId));
-        if (isCreatorOrAssigned) {
-          try {
-            await axios.post(`${CHAT_BASE}/api/chats/${ticket.groupChatId}/add-user`, { user_id: userId }, {
-              headers: {
-                Authorization: req.headers['authorization'] || '',
-                'X-Service-Token': process.env.CHAT_INTERNAL_TOKEN || process.env.INTERNAL_SERVICE_TOKEN || ''
-              }
-            });
-            const refetch = await axios.get(`${CHAT_BASE}/api/chats/${ticket.groupChatId}`, {
-              headers: {
-                Authorization: req.headers['authorization'] || '',
-                'X-Service-Token': process.env.CHAT_INTERNAL_TOKEN || process.env.INTERNAL_SERVICE_TOKEN || ''
-              }
-            });
-            const joinedChat = refetch.data;
-            return res.status(200).json({ success: true, hasGroup: true, groupChat: joinedChat, isParticipant: true, canJoin: true });
-          } catch (_) {}
-        }
-      }
-      throw e;
-    }
-    
-  } catch (error) {
-    console.error('Lỗi khi lấy group chat của ticket:', error);
-    res.status(500).json({ success: false, message: error.message });
-  }
-};
-
-// Debug endpoint để kiểm tra participants của group chat
-exports.debugTicketGroupChat = async (req, res) => {
-  try {
-    const { ticketId } = req.params;
-    const userId = req.user._id;
-
-    const ticket = await Ticket.findById(ticketId).populate('creator assignedTo');
-    if (!ticket) {
-      return res.status(404).json({ success: false, message: "Ticket không tồn tại" });
-    }
-
-    if (!ticket.groupChatId) {
-      return res.status(404).json({ success: false, message: "Ticket chưa có group chat" });
-    }
-
-    const groupChat = await Chat.findById(ticket.groupChatId)
-      .populate('participants', 'fullname email role')
-      .populate('creator', 'fullname email role')
-      .populate('admins', 'fullname email role');
-
-    const debugInfo = {
-      ticketInfo: {
-        id: ticket._id,
-        code: ticket.ticketCode,
-        creator: ticket.creator,
-        assignedTo: ticket.assignedTo
-      },
-      currentUser: {
-        id: userId,
-        fullname: req.user.fullname,
-        role: req.user.role
-      },
-      groupChatInfo: {
-        id: groupChat._id,
-        name: groupChat.name,
-        participants: groupChat.participants,
-        creator: groupChat.creator,
-        admins: groupChat.admins,
-        participantsCount: groupChat.participants.length
-      },
-      permissionCheck: {
-        isCurrentUserInParticipants: groupChat.participants.some(p => p._id.equals(userId)),
-        isCreator: ticket.creator.equals(userId),
-        isAssignedTo: ticket.assignedTo && ticket.assignedTo.equals(userId),
-        isAdmin: req.user.role === "admin" || req.user.role === "superadmin",
-        isCreatorOrAssigned: ticket.creator.equals(userId) || (ticket.assignedTo && ticket.assignedTo.equals(userId))
-      }
-    };
-
-    res.status(200).json({ success: true, debug: debugInfo });
-  } catch (error) {
-    console.error('Debug error:', error);
-    res.status(500).json({ success: false, message: error.message });
-  }
-};
-
 async function createTicketHelper({ title, description, creatorId, fallbackCreatorId = null, priority, files = [], bearerToken = null }) {
   // 1) Tính SLA Phase 1 (4h, 8:00 - 17:00)
   const phase1Duration = 4;
