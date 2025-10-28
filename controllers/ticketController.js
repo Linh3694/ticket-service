@@ -1360,3 +1360,147 @@ async function createTicketHelper({ title, description, creatorId, fallbackCreat
 }
 
 exports.createTicketHelper = createTicketHelper;
+
+/**
+ * 🎫 Nhận ticket - gán cho user hiện tại và chuyển sang "Processing"
+ */
+exports.assignTicketToMe = async (req, res) => {
+  try {
+    const { ticketId } = req.params;
+    const userId = req.user._id;
+
+    console.log('📥 [assignTicketToMe] User:', req.user.email, 'Ticket:', ticketId);
+
+    // Tìm ticket
+    const ticket = await Ticket.findById(ticketId).populate('creator assignedTo');
+    if (!ticket) {
+      return res.status(404).json({ success: false, message: 'Ticket không tồn tại' });
+    }
+
+    // Kiểm tra quyền - chỉ SIS IT/System Manager mới được
+    if (!req.user.roles || !req.user.roles.includes('SIS IT') && !req.user.roles.includes('System Manager')) {
+      return res.status(403).json({ success: false, message: 'Bạn không có quyền nhận ticket này' });
+    }
+
+    // Kiểm tra status - chỉ ticket "Assigned" mới được nhận
+    if (ticket.status !== 'Assigned') {
+      return res.status(400).json({ success: false, message: 'Chỉ có thể nhận ticket ở trạng thái "Assigned"' });
+    }
+
+    // Cập nhật ticket
+    const previousAssignedTo = ticket.assignedTo?.fullname || 'Chưa gán';
+    ticket.assignedTo = userId;
+    ticket.status = 'Processing';
+    ticket.acceptedAt = new Date();
+    ticket.updatedAt = new Date();
+
+    // Log history
+    ticket.history.push({
+      timestamp: new Date(),
+      action: `<strong>${req.user.fullname}</strong> đã nhận ticket từ <strong>${previousAssignedTo}</strong>. Trạng thái chuyển sang "Đang xử lý"`,
+      user: userId
+    });
+
+    await ticket.save();
+    console.log(`✅ [assignTicketToMe] Ticket assigned to ${req.user.email}`);
+
+    // Populate và trả về
+    await ticket.populate('creator assignedTo', 'fullname email avatarUrl');
+
+    // Send notification
+    try {
+      await notificationService.sendTicketUpdateNotification(ticket, 'assigned', null);
+    } catch (notifyError) {
+      console.warn('⚠️  Error sending notification:', notifyError.message);
+    }
+
+    res.status(200).json({
+      success: true,
+      data: {
+        _id: ticket._id,
+        ticketCode: ticket.ticketCode,
+        title: ticket.title,
+        status: ticket.status,
+        assignedTo: ticket.assignedTo,
+        acceptedAt: ticket.acceptedAt,
+        updatedAt: ticket.updatedAt
+      }
+    });
+  } catch (error) {
+    console.error('❌ Error in assignTicketToMe:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+/**
+ * 🚫 Huỷ ticket với lý do
+ */
+exports.cancelTicketWithReason = async (req, res) => {
+  try {
+    const { ticketId } = req.params;
+    const { cancelReason } = req.body;
+    const userId = req.user._id;
+
+    console.log('❌ [cancelTicket] User:', req.user.email, 'Ticket:', ticketId, 'Reason:', cancelReason);
+
+    // Kiểm tra lý do
+    if (!cancelReason || !cancelReason.trim()) {
+      return res.status(400).json({ success: false, message: 'Vui lòng nhập lý do huỷ ticket' });
+    }
+
+    // Tìm ticket
+    const ticket = await Ticket.findById(ticketId).populate('creator assignedTo');
+    if (!ticket) {
+      return res.status(404).json({ success: false, message: 'Ticket không tồn tại' });
+    }
+
+    // Kiểm tra quyền - creator hoặc assignedTo hoặc admin
+    const isCreator = ticket.creator._id.toString() === userId.toString();
+    const isAssignedTo = ticket.assignedTo && ticket.assignedTo._id.toString() === userId.toString();
+    const isAdmin = req.user.role === 'admin' || req.user.role === 'superadmin';
+
+    if (!isCreator && !isAssignedTo && !isAdmin) {
+      return res.status(403).json({ success: false, message: 'Bạn không có quyền huỷ ticket này' });
+    }
+
+    // Cập nhật ticket
+    ticket.status = 'Cancelled';
+    ticket.cancellationReason = cancelReason.trim();
+    ticket.updatedAt = new Date();
+
+    // Log history
+    ticket.history.push({
+      timestamp: new Date(),
+      action: `<strong>${req.user.fullname}</strong> đã huỷ ticket. Lý do: <strong>"${cancelReason.trim()}"</strong>`,
+      user: userId
+    });
+
+    await ticket.save();
+    console.log(`✅ [cancelTicket] Ticket cancelled: ${ticketId}`);
+
+    // Populate và trả về
+    await ticket.populate('creator assignedTo', 'fullname email avatarUrl');
+
+    // Send notification
+    try {
+      await notificationService.sendTicketUpdateNotification(ticket, 'status_updated', null);
+    } catch (notifyError) {
+      console.warn('⚠️  Error sending notification:', notifyError.message);
+    }
+
+    res.status(200).json({
+      success: true,
+      data: {
+        _id: ticket._id,
+        ticketCode: ticket.ticketCode,
+        title: ticket.title,
+        status: ticket.status,
+        cancellationReason: ticket.cancellationReason,
+        updatedAt: ticket.updatedAt
+      }
+    });
+  } catch (error) {
+    console.error('❌ Error in cancelTicketWithReason:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
