@@ -1106,6 +1106,70 @@ exports.getTicketCategories = async (req, res) => {
   }
 };
 
+/**
+ * DEBUG: Kiểm tra team members và roles
+ */
+exports.debugTeamMembers = async (req, res) => {
+  try {
+    const SupportTeamMember = require('../models/SupportTeamMember');
+    
+    // Lấy tất cả team members active
+    const allMembers = await SupportTeamMember.find({ isActive: true });
+    
+    console.log(`📊 [debugTeamMembers] Found ${allMembers.length} active team members`);
+    
+    // Group by roles
+    const membersByRole = {};
+    allMembers.forEach(member => {
+      console.log(`  - ${member.fullname} (${member.email}): roles = ${JSON.stringify(member.roles)}`);
+      
+      member.roles.forEach(role => {
+        if (!membersByRole[role]) {
+          membersByRole[role] = [];
+        }
+        membersByRole[role].push({
+          _id: member._id,
+          fullname: member.fullname,
+          email: member.email,
+          ticketCount: 0 // Will be updated below
+        });
+      });
+    });
+    
+    // Count tickets for each member
+    for (const role in membersByRole) {
+      for (const member of membersByRole[role]) {
+        const ticketCount = await Ticket.countDocuments({
+          assignedTo: member._id,
+          status: { $in: ['Assigned', 'Processing'] }
+        });
+        member.ticketCount = ticketCount;
+      }
+    }
+    
+    res.status(200).json({
+      success: true,
+      data: {
+        totalMembers: allMembers.length,
+        membersByRole,
+        allMembers: allMembers.map(m => ({
+          _id: m._id,
+          fullname: m.fullname,
+          email: m.email,
+          roles: m.roles,
+          isActive: m.isActive
+        }))
+      }
+    });
+  } catch (error) {
+    console.error('❌ Error in debugTeamMembers:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+};
+
 // Helper function to create ticket
 async function createTicketHelper({ title, description, creatorId, fallbackCreatorId = null, priority, files = [], bearerToken = null }) {
   // 1) Tính SLA Phase 1 (4h, 8:00 - 17:00)
