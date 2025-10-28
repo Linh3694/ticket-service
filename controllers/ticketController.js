@@ -1398,13 +1398,21 @@ exports.assignTicketToMe = async (req, res) => {
     // Nếu không tìm thấy, tạo mới SupportTeamMember
     if (!supportTeamMember) {
       console.log(`⚠️  [assignTicketToMe] SupportTeamMember not found for ${userEmail}, creating new one...`);
+      
+      // 🔴 Lọc roles hợp lệ (chỉ giữ những role nằm trong SUPPORT_ROLES)
+      const SUPPORT_ROLES = SupportTeamMember.SUPPORT_ROLES || ['Overall', 'Account', 'Camera System', 'Network System', 'Bell System', 'Software'];
+      const validRoles = req.user.roles ? req.user.roles.filter(role => SUPPORT_ROLES.includes(role)) : [];
+      
+      console.log(`  Raw roles từ Frappe: ${JSON.stringify(req.user.roles)}`);
+      console.log(`  Valid roles sau lọc: ${JSON.stringify(validRoles)}`);
+      
       supportTeamMember = new SupportTeamMember({
         userId: userEmail,
         fullname: req.user.fullname || userEmail,
         email: userEmail,
         avatarUrl: req.user.avatarUrl || '',
         department: req.user.department || '',
-        roles: req.user.roles || [],
+        roles: validRoles, // ✅ Chỉ lưu role hợp lệ
         isActive: true
       });
       await supportTeamMember.save();
