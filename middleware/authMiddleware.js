@@ -1,59 +1,11 @@
-const axios = require('axios');
+const jwt = require('jsonwebtoken');
 const mongoose = require('mongoose');
 const User = require('../models/Users');
 
-// Frappe API configuration
-const FRAPPE_API_URL = process.env.FRAPPE_API_URL || 'https://admin.sis.wellspring.edu.vn';
+// Get JWT secret từ env
+const JWT_SECRET = process.env.JWT_SECRET || 'default-secret-key';
 
-// Try validating token via custom ERP endpoint first, then fallback to Frappe default
-async function resolveFrappeUserByToken(token) {
-  // 1) Try ERP custom endpoint that returns user object with status success
-  try {
-    const erpResp = await axios.get(
-      `${FRAPPE_API_URL}/api/method/erp.api.erp_common_user.auth.get_current_user`,
-      {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'X-Frappe-CSRF-Token': token,
-        },
-        timeout: 15000,
-      }
-    );
-    if (erpResp.data?.status === 'success' && erpResp.data.user) {
-      return erpResp.data.user; // { name, email, full_name, ... }
-    }
-  } catch (e) {
-    // continue to fallback
-  }
-
-  // 2) Fallback: Frappe default get_logged_user -> fetch User doc
-  const loggedResp = await axios.get(
-    `${FRAPPE_API_URL}/api/method/frappe.auth.get_logged_user`,
-    {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'X-Frappe-CSRF-Token': token,
-      },
-      timeout: 15000,
-    }
-  );
-
-  if (!loggedResp.data?.message) return null;
-
-  const userResp = await axios.get(
-    `${FRAPPE_API_URL}/api/resource/User/${loggedResp.data.message}`,
-    {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'X-Frappe-CSRF-Token': token,
-      },
-      timeout: 15000,
-    }
-  );
-
-  return userResp.data?.data || null;
-}
-
+// 🔵 NEW: Verify JWT locally (FAST & EFFICIENT)
 const authenticate = async (req, res, next) => {
   try {
     const token = req.header('Authorization')?.replace('Bearer ', '');
@@ -65,66 +17,70 @@ const authenticate = async (req, res, next) => {
       });
     }
 
-    let frappeUser = null;
+    // 🔑 Verify JWT signature locally (NO Frappe call needed!)
+    let decoded;
     try {
-      frappeUser = await resolveFrappeUserByToken(token);
-    } catch (e) {
-      // fallthrough to error handling below
-    }
-
-    if (!frappeUser) {
+      decoded = jwt.verify(token, JWT_SECRET);
+      console.log('✅ [Auth] JWT verified locally for user:', decoded.email);
+    } catch (err) {
+      console.warn('⚠️ [Auth] JWT verification failed:', err.message);
       return res.status(401).json({
         success: false,
-        message: 'Invalid token.'
+        message: 'Invalid or expired token.'
       });
     }
 
-    // Try to map to local User in MongoDB by email first, then by fullname
-    let localUser = await User.findOne({ email: frappeUser.email });
-    if (!localUser && (frappeUser.full_name || frappeUser.fullname)) {
-      localUser = await User.findOne({ fullname: frappeUser.full_name || frappeUser.fullname });
+    // 🟢 Token valid! Extract user info từ JWT payload
+    if (!decoded.email) {
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid token: missing email claim.'
+      });
     }
 
-    // Auto-provision user in local DB if not exists
+    // 📦 Find user trong MongoDB (đã synced từ Frappe)
+    let localUser = await User.findOne({ email: decoded.email });
+    
     if (!localUser) {
+      // Auto-provision user nếu chưa tồn tại
+      console.log(`📝 [Auth] Auto-provisioning user: ${decoded.email}`);
       try {
         localUser = await User.create({
-          email: frappeUser.email,
-          fullname: frappeUser.full_name || frappeUser.fullname || frappeUser.name,
-          role: frappeUser.role || 'user',
-          avatarUrl: frappeUser.user_image || '',
-          department: frappeUser.department || '',
+          email: decoded.email,
+          fullname: decoded.email || 'Unknown User',
+          role: 'user',
           provider: 'frappe',
           active: true,
           disabled: false,
+          roles: decoded.roles || []
         });
-      } catch (provErr) {
-        // Handle race condition for unique indexes
-        localUser = await User.findOne({ email: frappeUser.email });
-        if (!localUser) {
-          return res.status(401).json({
-            success: false,
-            message: 'User not provisioned in ticket-service database.'
-          });
+        console.log(`✅ [Auth] User auto-provisioned: ${decoded.email}`);
+      } catch (createErr) {
+        // Handle unique index conflict
+        if (createErr.code === 11000) {
+          localUser = await User.findOne({ email: decoded.email });
+        } else {
+          throw createErr;
         }
       }
     }
 
-    // Map to our auth user format using local ObjectId
+    // ✅ Set authenticated user on request
     req.user = {
       _id: localUser._id,
-      fullname: localUser.fullname || frappeUser.full_name || frappeUser.name,
-      email: localUser.email || frappeUser.email,
-      role: localUser.role || frappeUser.role || 'user',
-      avatarUrl: localUser.avatarUrl || frappeUser.user_image || '',
-      department: localUser.department || frappeUser.department || '',
-      phone: localUser.phone || frappeUser.phone || '',
-      isActive: !localUser.disabled,
+      fullname: localUser.fullname || decoded.email,
+      email: localUser.email,
+      role: localUser.role || 'user',
+      avatarUrl: localUser.avatarUrl || '',
+      department: localUser.department || '',
+      roles: localUser.roles || decoded.roles || [],
+      isActive: !localUser.disabled
     };
 
+    console.log(`🔐 [Auth] Request authenticated for: ${req.user.email}`);
     next();
   } catch (error) {
-    console.error('Frappe authentication error:', error.response?.data || error.message);
+    console.error('❌ [Auth] Authentication error:', error.message);
     res.status(401).json({
       success: false,
       message: 'Authentication failed.'
@@ -145,33 +101,14 @@ const authenticateWithAPIKey = async (req, res, next) => {
       });
     }
 
-    // Validate API key with Frappe
-    const response = await axios.post(`${FRAPPE_API_URL}/api/method/frappe.auth.validate_api_key_secret`, {
-      api_key: apiKey,
-      api_secret: apiSecret
+    // TODO: Implement API key validation against database
+    // For now, just reject
+    return res.status(401).json({ 
+      success: false, 
+      message: 'API key authentication not yet implemented.' 
     });
-
-    if (response.data && response.data.message) {
-      req.user = {
-        _id: response.data.message.user,
-        fullname: response.data.message.full_name || response.data.message.user,
-        email: response.data.message.email,
-        role: response.data.message.role || 'user',
-        avatarUrl: response.data.message.user_image || '',
-        department: response.data.message.department || '',
-        phone: response.data.message.phone || '',
-        isActive: true
-      };
-      
-      next();
-    } else {
-      return res.status(401).json({ 
-        success: false, 
-        message: 'Invalid API credentials.' 
-      });
-    }
   } catch (error) {
-    console.error('API key authentication error:', error.response?.data || error.message);
+    console.error('❌ [Auth] API key authentication error:', error.message);
     res.status(401).json({ 
       success: false, 
       message: 'API authentication failed.' 
