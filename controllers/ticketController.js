@@ -9,6 +9,11 @@ const path = require('path');
 // Frappe API configuration
 const FRAPPE_API_URL = process.env.FRAPPE_API_URL || 'https://admin.sis.wellspring.edu.vn';
 
+// Helper function to build full file URL after FRAPPE_API_URL constant
+function buildFullFileUrl(relativePath) {
+  return `${FRAPPE_API_URL}${relativePath}`;
+}
+
 // Helper function to get user from Frappe
 async function getFrappeUser(userId, token) {
   try {
@@ -266,7 +271,7 @@ exports.createTicket = async (req, res) => {
           // Update attachment URL in database
           const attachmentIndex = newTicket.attachments.findIndex(a => a.url.includes(file.filename));
           if (attachmentIndex !== -1) {
-            newTicket.attachments[attachmentIndex].url = newPath;
+            newTicket.attachments[attachmentIndex].url = buildFullFileUrl(`/${newPath}`);
           }
         } catch (moveError) {
           console.error(`   ⚠️  Error moving file ${file.filename}:`, moveError.message);
