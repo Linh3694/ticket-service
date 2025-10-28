@@ -216,46 +216,115 @@ exports.debugFrappeUsers = async (req, res) => {
       });
     }
     
-    console.log('🔍 [debugFrappeUsers] Calling Frappe API with token...');
+    console.log('🔍 [debugFrappeUsers] Testing multiple ways to fetch User fields...');
     
-    const response = await axios.get(
-      `${FRAPPE_API_URL}/api/resource/User`,
-      {
-        params: {
-          fields: JSON.stringify(['name', 'full_name', 'email', 'user_image', 'department', 'enabled', 'first_name', 'last_name']),
-          limit_page_length: 3  // Chỉ lấy 3 để debug
-        },
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'X-Frappe-CSRF-Token': token,
-          'Content-Type': 'application/json'
+    // Test 1: With fields as JSON string
+    console.log('\n📌 Test 1: fields=JSON.stringify([...])');
+    try {
+      const resp1 = await axios.get(
+        `${FRAPPE_API_URL}/api/resource/User`,
+        {
+          params: {
+            fields: JSON.stringify(['name', 'full_name', 'email', 'first_name', 'last_name']),
+            limit_page_length: 1
+          },
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'X-Frappe-CSRF-Token': token
+          }
         }
+      );
+      console.log('✅ Test 1 success. Fields returned:', Object.keys(resp1.data.data?.[0] || {}));
+    } catch (e) {
+      console.log('❌ Test 1 failed:', e.message);
+    }
+
+    // Test 2: With fields as comma-separated string
+    console.log('\n📌 Test 2: fields="name,full_name,email,first_name,last_name"');
+    try {
+      const resp2 = await axios.get(
+        `${FRAPPE_API_URL}/api/resource/User`,
+        {
+          params: {
+            fields: 'name,full_name,email,first_name,last_name',
+            limit_page_length: 1
+          },
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'X-Frappe-CSRF-Token': token
+          }
+        }
+      );
+      console.log('✅ Test 2 success. Fields returned:', Object.keys(resp2.data.data?.[0] || {}));
+    } catch (e) {
+      console.log('❌ Test 2 failed:', e.message);
+    }
+
+    // Test 3: Without fields parameter (get all fields)
+    console.log('\n📌 Test 3: No fields param (get all available fields)');
+    try {
+      const resp3 = await axios.get(
+        `${FRAPPE_API_URL}/api/resource/User`,
+        {
+          params: {
+            limit_page_length: 1
+          },
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'X-Frappe-CSRF-Token': token
+          }
+        }
+      );
+      console.log('✅ Test 3 success. Fields returned:', Object.keys(resp3.data.data?.[0] || {}));
+      console.log('📋 Sample user:', JSON.stringify(resp3.data.data?.[0], null, 2));
+    } catch (e) {
+      console.log('❌ Test 3 failed:', e.message);
+    }
+
+    // Test 4: Fetch single user by ID to see all available fields
+    console.log('\n📌 Test 4: Fetch single user by ID');
+    try {
+      // Lấy tên user đầu tiên
+      const listResp = await axios.get(
+        `${FRAPPE_API_URL}/api/resource/User`,
+        {
+          params: { limit_page_length: 1 },
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'X-Frappe-CSRF-Token': token
+          }
+        }
+      );
+      const userId = listResp.data.data?.[0]?.name;
+      
+      if (userId) {
+        const resp4 = await axios.get(
+          `${FRAPPE_API_URL}/api/resource/User/${userId}`,
+          {
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'X-Frappe-CSRF-Token': token
+            }
+          }
+        );
+        console.log(`✅ Test 4 success for user ${userId}`);
+        console.log('📋 User fields:', Object.keys(resp4.data.data || {}));
+        console.log('📋 Full user object:', JSON.stringify(resp4.data.data, null, 2));
       }
-    );
-    
-    console.log('📊 [debugFrappeUsers] Raw response from Frappe:');
-    console.log('Status:', response.status);
-    console.log('Data:', JSON.stringify(response.data, null, 2));
+    } catch (e) {
+      console.log('❌ Test 4 failed:', e.message);
+    }
     
     res.status(200).json({
       success: true,
-      debug_info: {
-        total_returned: response.data.data?.length || 0,
-        raw_response: response.data,
-        sample_user: response.data.data?.[0] || null,
-        fields_available: response.data.data?.[0] ? Object.keys(response.data.data[0]) : []
-      }
+      message: 'Check backend console logs for test results',
+      hint: 'Look at ticket-service logs to see which test passed'
     });
   } catch (error) {
     console.error('❌ [debugFrappeUsers] Error:', error.message);
-    if (error.response?.data) {
-      console.error('Response from Frappe:', error.response.data);
-    }
-    
-    res.status(error.response?.status || 500).json({
+    res.status(500).json({
       success: false,
-      error: error.message,
-      frappe_response: error.response?.data || null
+      error: error.message
     });
   }
 };
