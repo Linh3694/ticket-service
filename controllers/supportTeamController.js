@@ -23,35 +23,74 @@ async function getFrappeUser(userId, token) {
 // Helper function to get all users from Frappe
 async function getAllFrappeUsers(token) {
   try {
-    // 🔍 Lấy tất cả users với pagination để đảm bảo lấy hết
-    const fields = JSON.stringify(['name', 'full_name', 'email', 'user_image', 'department', 'enabled', 'first_name', 'last_name']);
+    console.log('🔍 [getAllFrappeUsers] Step 1: Fetch list of all users...');
     
-    // Cách 1: Cố lấy nhiều users cùng lúc
-    const response = await axios.get(
+    // Step 1: Lấy danh sách tất cả users (chỉ name)
+    const listResponse = await axios.get(
       `${FRAPPE_API_URL}/api/resource/User`,
       {
         params: {
-          fields: fields,
-          limit_page_length: 5000,  // 🔼 Tăng lên 5000 thay vì 999
-          order_by: 'name asc'  // Sắp xếp để consistent
+          limit_page_length: 5000,
+          order_by: 'name asc'
         },
         headers: {
           'Authorization': `Bearer ${token}`,
-          'X-Frappe-CSRF-Token': token,
-          'Content-Type': 'application/json'
+          'X-Frappe-CSRF-Token': token
         }
       }
     );
     
-    let users = response.data.data || [];
-    console.log(`✅ [getAllFrappeUsers] Loaded ${users.length} users from Frappe`);
+    let userList = listResponse.data.data || [];
+    console.log(`✅ [getAllFrappeUsers] Step 1: Found ${userList.length} users`);
     
-    // 🔍 Log sample user để kiểm tra fields
-    if (users.length > 0) {
-      console.log('📝 [getAllFrappeUsers] Sample user:', JSON.stringify(users[0], null, 2));
+    // Step 2: Fetch chi tiết từng user (có enabled filter)
+    console.log('🔍 [getAllFrappeUsers] Step 2: Fetching details for each user...');
+    const detailedUsers = [];
+    
+    // Chỉ fetch chi tiết top 100 users để tránh quá chậm
+    const usersToFetch = userList.slice(0, 100);
+    
+    for (const userItem of usersToFetch) {
+      try {
+        const userDetailResp = await axios.get(
+          `${FRAPPE_API_URL}/api/resource/User/${userItem.name}`,
+          {
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'X-Frappe-CSRF-Token': token
+            }
+          }
+        );
+        
+        const userData = userDetailResp.data.data;
+        
+        // Filter: Chỉ lấy enabled users (enabled = 1)
+        if (userData.enabled === 1) {
+          detailedUsers.push(userData);
+        }
+      } catch (err) {
+        console.warn(`⚠️  Failed to fetch user details for ${userItem.name}: ${err.message}`);
+        // Continue với user tiếp theo
+      }
     }
     
-    return users;
+    console.log(`✅ [getAllFrappeUsers] Step 2: Fetched ${detailedUsers.length} enabled users (out of ${usersToFetch.length} checked)`);
+    
+    // Step 3: Filter để loại bỏ những user không cần
+    // Ví dụ: Website User, Administrator, etc.
+    const filteredUsers = detailedUsers.filter(user => {
+      // Chỉ lấy Internal User hoặc System User
+      const validUserTypes = ['System User', 'Internal User'];
+      return validUserTypes.includes(user.user_type);
+    });
+    
+    console.log(`✅ [getAllFrappeUsers] Step 3: After filtering by user_type: ${filteredUsers.length} users`);
+    
+    if (filteredUsers.length > 0) {
+      console.log('📝 [getAllFrappeUsers] Sample user:', JSON.stringify(filteredUsers[0], null, 2));
+    }
+    
+    return filteredUsers;
   } catch (error) {
     console.error('❌ [getAllFrappeUsers] Error:', error.message);
     if (error.response?.data) {
@@ -168,23 +207,15 @@ exports.getFrappeUsers = async (req, res) => {
     
     // Format users
     const formattedUsers = users.map(user => {
-      // 🔍 Xử lý full_name: ưu tiên full_name, fallback to first_name + last_name hoặc name
-      let fullname = user.full_name || '';
-      
-      if (!fullname && (user.first_name || user.last_name)) {
-        fullname = `${user.first_name || ''} ${user.last_name || ''}`.trim();
-      }
-      
-      if (!fullname) {
-        fullname = user.name;  // Fallback cuối cùng
-      }
+      // 🔍 Sử dụng full_name từ Frappe
+      const fullname = user.full_name || `${user.first_name || ''} ${user.last_name || ''}`.trim() || user.name;
       
       return {
         userId: user.name,
         fullname: fullname,
         email: user.email,
         avatarUrl: user.user_image || '',
-        department: user.department || ''
+        department: user.location || ''  // Dùng location làm department
       };
     });
     
