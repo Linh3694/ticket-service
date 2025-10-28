@@ -456,6 +456,14 @@ exports.updateTicket = async (req, res) => {
   try {
     console.log('📝 [updateTicket] Updating ticket:', ticketId);
     console.log('   Updates:', JSON.stringify(updates, null, 2));
+    // Handle file attachments if provided
+    if (req.files && req.files.length > 0) {
+      console.log(`   Files: ${req.files.length} file(s)`);
+      updates.attachments = req.files.map(file => ({
+        filename: file.originalname,
+        url: file.path || file.filename
+      }));
+    }
 
     const ticket = await Ticket.findById(ticketId)
       .populate('creator assignedTo');
