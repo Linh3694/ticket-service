@@ -106,16 +106,40 @@ exports.getTeamMemberById = async (req, res) => {
 // Lấy danh sách users từ Frappe
 exports.getFrappeUsers = async (req, res) => {
   try {
+    // 🔓 PUBLIC endpoint - không yêu cầu authentication
+    // Nhưng vẫn cố lấy token từ request để call Frappe API nếu có
     const token = req.header('Authorization')?.replace('Bearer ', '');
     
-    if (!token) {
-      return res.status(401).json({ 
-        success: false, 
-        message: 'No token provided' 
-      });
-    }
+    // ⚠️ Nếu không có token, vẫn cố gọi Frappe API với default header
+    // hoặc fallback method khác
+    let users = [];
     
-    const users = await getAllFrappeUsers(token);
+    if (token) {
+      // Có token - gọi Frappe API như bình thường
+      users = await getAllFrappeUsers(token);
+    } else {
+      // Không có token - vẫn cố gọi với API token nếu config có
+      console.log('⚠️ [getFrappeUsers] No auth token provided, using default headers');
+      
+      // Fallback: sử dụng API key nếu có trong env
+      try {
+        const response = await axios.get(
+          `${FRAPPE_API_URL}/api/resource/User?fields=["name","full_name","email","user_image","department"]&limit_page_length=999`,
+          {
+            headers: {
+              'Authorization': process.env.FRAPPE_API_KEY && process.env.FRAPPE_API_SECRET 
+                ? `token ${process.env.FRAPPE_API_KEY}:${process.env.FRAPPE_API_SECRET}`
+                : '',
+              'Content-Type': 'application/json'
+            }
+          }
+        );
+        users = response.data.data || [];
+      } catch (fallbackErr) {
+        console.error('❌ Fallback API call failed:', fallbackErr.message);
+        users = [];
+      }
+    }
     
     // Format users
     const formattedUsers = users.map(user => ({
