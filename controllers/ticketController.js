@@ -267,6 +267,15 @@ exports.createTicket = async (req, res) => {
     }
 
     // Populate creator and assignedTo for response
+    console.log(`🔧 [createTicket] Before populate - assignedTo: ${newTicket.assignedTo}`);
+    
+    if (newTicket.assignedTo) {
+      // Check if assignedTo user exists in SupportTeamMember
+      const SupportTeamMember = require('../models/SupportTeamMember');
+      const member = await SupportTeamMember.findById(newTicket.assignedTo);
+      console.log(`🔧 [createTicket] assignedTo user exists: ${member ? 'YES' : 'NO'}`);
+    }
+    
     await newTicket.populate('creator assignedTo', 'fullname email avatarUrl');
 
     console.log(`📋 [createTicket] Before response:`);
