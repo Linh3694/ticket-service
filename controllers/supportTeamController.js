@@ -471,6 +471,212 @@ exports.deleteTeamMember = async (req, res) => {
   }
 };
 
+// 🔄 MANUAL SYNC: Đồng bộ user từ Frappe (Call manually nếu cần)
+// Dùng token từ request header
+exports.syncUsersFromFrappe = async (req, res) => {
+  try {
+    const token = req.header('Authorization')?.replace('Bearer ', '');
+    
+    if (!token) {
+      return res.status(401).json({
+        success: false,
+        message: 'Token required for sync'
+      });
+    }
+    
+    console.log('🔄 [Manual Sync] Starting user sync from Frappe...');
+    
+    const User = require('../models/Users');
+    
+    // Step 1: Fetch enabled users từ Frappe
+    const listResponse = await axios.get(
+      `${FRAPPE_API_URL}/api/resource/User`,
+      {
+        params: {
+          limit_page_length: 5000,
+          order_by: 'name asc'
+        },
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'X-Frappe-CSRF-Token': token
+        }
+      }
+    );
+    
+    const userList = listResponse.data.data || [];
+    console.log(`🔄 [Manual Sync] Found ${userList.length} users in Frappe`);
+    
+    // Step 2: Fetch chi tiết từng user
+    let synced = 0;
+    let failed = 0;
+    const syncedUsers = [];
+    
+    for (const userItem of userList.slice(0, 100)) {
+      try {
+        const userDetailResp = await axios.get(
+          `${FRAPPE_API_URL}/api/resource/User/${userItem.name}`,
+          {
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'X-Frappe-CSRF-Token': token
+            }
+          }
+        );
+        
+        const frappe_user = userDetailResp.data.data;
+        
+        // Chỉ sync enabled users
+        if (frappe_user.enabled !== 1) {
+          continue;
+        }
+        
+        // Separate roles:
+        // - frappe_roles: roles từ Frappe (System Manager, etc.)
+        // - supportTeamRoles: roles gắn trong ticket system (Overall, Camera System, etc.)
+        const frappe_roles = frappe_user.roles?.map(r => r.role) || [];
+        
+        const userData = {
+          email: frappe_user.email,
+          fullname: frappe_user.full_name || frappe_user.name,
+          avatarUrl: frappe_user.user_image || '',
+          department: frappe_user.location || '',
+          provider: 'frappe',
+          disabled: false,
+          active: true,
+          roles: frappe_roles,  // 🔵 Frappe roles (System Manager, System User, etc.)
+          // supportTeamRoles sẽ được quản lý riêng ở SupportTeamMember model
+          microsoftId: frappe_user.name  // Store name as reference
+        };
+        
+        const result = await User.findOneAndUpdate(
+          { email: frappe_user.email },
+          userData,
+          { upsert: true, new: true }
+        );
+        
+        syncedUsers.push({
+          email: result.email,
+          fullname: result.fullname,
+          frappe_roles: frappe_roles
+        });
+        synced++;
+      } catch (err) {
+        console.warn(`⚠️  Failed to sync ${userItem.name}: ${err.message}`);
+        failed++;
+      }
+    }
+    
+    console.log(`✅ [Manual Sync] Completed: ${synced} synced, ${failed} failed`);
+    
+    res.status(200).json({
+      success: true,
+      message: `User sync completed`,
+      stats: {
+        total_checked: Math.min(userList.length, 100),
+        synced,
+        failed,
+        synced_users: syncedUsers
+      }
+    });
+  } catch (error) {
+    console.error('❌ [Manual Sync] Error:', error.message);
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+};
+
+// 🔔 WEBHOOK: Nhận cập nhật từ Frappe khi user thay đổi
+exports.webhookUserChanged = async (req, res) => {
+  try {
+    console.log('🔔 [Webhook] User changed event:', {
+      event: req.body.event,
+      user: req.body.doc?.name,
+      timestamp: new Date().toISOString()
+    });
+    
+    const { doc, event } = req.body;
+    
+    // event: insert, update, delete
+    // doc: user document từ Frappe
+    
+    if (!doc || !doc.name) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid webhook payload'
+      });
+    }
+    
+    const User = require('../models/Users');
+    
+    if (event === 'delete') {
+      // Xoá user khỏi local DB
+      console.log(`🗑️  [Webhook] Deleting user: ${doc.name}`);
+      await User.deleteOne({ email: doc.email });
+    } else if (event === 'insert' || event === 'update') {
+      // Tạo hoặc cập nhật user trong local DB
+      console.log(`📝 [Webhook] Syncing user: ${doc.name}`);
+      
+      // 🔴 Roles từ Frappe (System Manager, System User, etc.)
+      // 🔵 SupportTeamRoles sẽ được quản lý riêng ở SupportTeamMember
+      const frappe_roles = doc.roles?.map(r => r.role) || [];
+      
+      const userData = {
+        email: doc.email,
+        fullname: doc.full_name || doc.name,
+        avatarUrl: doc.user_image || '',
+        department: doc.location || '',
+        provider: 'frappe',
+        disabled: doc.enabled === 1 ? false : true,
+        active: doc.enabled === 1,
+        roles: frappe_roles  // 🔴 Frappe roles only
+      };
+      
+      // Upsert: tạo nếu chưa có, cập nhật nếu đã có
+      const result = await User.findOneAndUpdate(
+        { email: doc.email },
+        userData,
+        { upsert: true, new: true }
+      );
+      
+      console.log(`✅ [Webhook] User synced: ${doc.name} (roles: ${frappe_roles.join(', ')})`);
+    }
+    
+    res.status(200).json({
+      success: true,
+      message: `User ${event} handled successfully`
+    });
+  } catch (error) {
+    console.error('❌ [Webhook] Error handling user change:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+};
+
+// 🧪 DEBUG: Test webhook format
+exports.webhookTest = async (req, res) => {
+  try {
+    console.log('🧪 [Webhook Test] Received payload:', JSON.stringify(req.body, null, 2));
+    
+    res.status(200).json({
+      success: true,
+      message: 'Webhook payload logged',
+      received_event: req.body.event,
+      received_doc_name: req.body.doc?.name,
+      doc_keys: req.body.doc ? Object.keys(req.body.doc) : []
+    });
+  } catch (error) {
+    console.error('❌ [Webhook Test] Error:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+};
+
 // Lấy danh sách available roles
 exports.getAvailableRoles = async (req, res) => {
   try {
