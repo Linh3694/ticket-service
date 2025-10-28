@@ -1368,8 +1368,9 @@ exports.assignTicketToMe = async (req, res) => {
   try {
     const { ticketId } = req.params;
     const userId = req.user._id;
+    const userEmail = req.user.email;
 
-    console.log('📥 [assignTicketToMe] User:', req.user.email, 'Ticket:', ticketId);
+    console.log('📥 [assignTicketToMe] User:', userEmail, 'Ticket:', ticketId);
 
     // Tìm ticket
     const ticket = await Ticket.findById(ticketId).populate('creator assignedTo');
@@ -1387,9 +1388,32 @@ exports.assignTicketToMe = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Chỉ có thể nhận ticket ở trạng thái "Assigned"' });
     }
 
+    // 🔴 FIX: Tìm SupportTeamMember của user hiện tại
+    const SupportTeamMember = require('../models/SupportTeamMember');
+    let supportTeamMember = await SupportTeamMember.findOne({ 
+      email: userEmail,
+      isActive: true 
+    });
+
+    // Nếu không tìm thấy, tạo mới SupportTeamMember
+    if (!supportTeamMember) {
+      console.log(`⚠️  [assignTicketToMe] SupportTeamMember not found for ${userEmail}, creating new one...`);
+      supportTeamMember = new SupportTeamMember({
+        userId: userEmail,
+        fullname: req.user.fullname || userEmail,
+        email: userEmail,
+        avatarUrl: req.user.avatarUrl || '',
+        department: req.user.department || '',
+        roles: req.user.roles || [],
+        isActive: true
+      });
+      await supportTeamMember.save();
+      console.log(`✅ Created new SupportTeamMember: ${supportTeamMember._id}`);
+    }
+
     // Cập nhật ticket
     const previousAssignedTo = ticket.assignedTo?.fullname || 'Chưa gán';
-    ticket.assignedTo = userId;
+    ticket.assignedTo = supportTeamMember._id; // ✅ Gán SupportTeamMember._id thay vì User._id
     ticket.status = 'Processing';
     ticket.acceptedAt = new Date();
     ticket.updatedAt = new Date();
@@ -1402,7 +1426,7 @@ exports.assignTicketToMe = async (req, res) => {
     });
 
     await ticket.save();
-    console.log(`✅ [assignTicketToMe] Ticket assigned to ${req.user.email}`);
+    console.log(`✅ [assignTicketToMe] Ticket assigned to ${userEmail} (SupportTeamMember: ${supportTeamMember._id})`);
 
     // Populate và trả về
     await ticket.populate('creator assignedTo', 'fullname email avatarUrl');
