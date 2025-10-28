@@ -159,9 +159,10 @@ const userRoutes = require('./routes/user');
 const notificationService = require('./services/notificationService');
 
 // Use routes
-app.use("/api/ticket", ticketRoutes);
-app.use("/api/ticket/support-team", supportTeamRoutes);
-app.use("/api/ticket/user", userRoutes);
+// ⚠️ IMPORTANT: Order matters! More specific routes BEFORE generic ones
+app.use("/api/ticket/support-team", supportTeamRoutes);  // SPECIFIC - put first
+app.use("/api/ticket/user", userRoutes);                 // SPECIFIC
+app.use("/api/ticket", ticketRoutes);                    // GENERIC - put last
 app.use("/api/email", emailRoutes);
 
 // Frappe compatible routes
