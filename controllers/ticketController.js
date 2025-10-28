@@ -413,9 +413,12 @@ exports.getTicketById = async (req, res) => {
       return res.status(404).json({ success: false, message: "Ticket không tồn tại" });
     }
 
-    return res.status(200).json({ success: true, ticket });
+    return res.status(200).json({ 
+      success: true, 
+      data: ticket 
+    });
   } catch (error) {
-    console.error("Lỗi khi lấy ticket:", error);
+    console.error("❌ Error in getTicketById:", error);
     return res.status(500).json({ success: false, message: error.message });
   }
 };
@@ -511,6 +514,52 @@ exports.updateTicket = async (req, res) => {
     });
   } catch (error) {
     console.error('❌ Error in updateTicket:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+/**
+ * Xóa ticket (soft delete - chỉ set status = Cancelled)
+ */
+exports.deleteTicket = async (req, res) => {
+  const { ticketId } = req.params;
+  const userId = req.user._id;
+
+  try {
+    console.log('🗑️  [deleteTicket] Deleting ticket:', ticketId);
+
+    const ticket = await Ticket.findById(ticketId).populate('creator assignedTo');
+
+    if (!ticket) {
+      return res.status(404).json({ success: false, message: "Ticket không tồn tại" });
+    }
+
+    // Check permission: only creator can delete
+    if (!ticket.creator.equals(userId) && req.user.role !== 'admin') {
+      return res.status(403).json({ success: false, message: "Bạn không có quyền xóa ticket này" });
+    }
+
+    // Soft delete: set status to Cancelled
+    ticket.status = 'Cancelled';
+    ticket.cancellationReason = 'Deleted by creator';
+    ticket.updatedAt = new Date();
+
+    // Log history
+    ticket.history.push({
+      timestamp: new Date(),
+      action: `Ticket cancelled by ${req.user.fullname || req.user.email}`,
+      user: userId
+    });
+
+    await ticket.save();
+    console.log(`✅ [deleteTicket] Ticket cancelled: ${ticketId}`);
+
+    res.status(200).json({
+      success: true,
+      message: 'Ticket đã được xóa'
+    });
+  } catch (error) {
+    console.error('❌ Error in deleteTicket:', error);
     res.status(500).json({ success: false, message: error.message });
   }
 };

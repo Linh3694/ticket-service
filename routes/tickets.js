@@ -24,6 +24,7 @@ router.get("/me", authenticate, ticketController.getMe);
 // Dynamic routes with :ticketId (MUST be last!)
 router.get("/:ticketId", authenticate, ticketController.getTicketById);
 router.put("/:ticketId", authenticate, ticketController.updateTicket);
+router.delete("/:ticketId", authenticate, ticketController.deleteTicket);
 router.post("/:ticketId/feedback", authenticate, ticketController.addFeedback);
 router.post("/:ticketId/escalate", authenticate, ticketController.escalateTicket);
 router.post("/:ticketId/messages", authenticate, uploadMessage.single("file"), ticketController.sendMessage);
