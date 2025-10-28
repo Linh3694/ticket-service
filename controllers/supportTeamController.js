@@ -97,6 +97,9 @@ exports.getAllTeamMembers = async (req, res) => {
   try {
     const { role, search } = req.query;
     
+    console.log('🔍 [getAllTeamMembers] Starting query...');
+    console.log('   Query params - role:', role, 'search:', search);
+    
     let query = { isActive: true };
     
     // Filter by role if specified
@@ -104,7 +107,12 @@ exports.getAllTeamMembers = async (req, res) => {
       query.roles = role;
     }
     
+    console.log('📋 [getAllTeamMembers] MongoDB query:', JSON.stringify(query));
+    
     let members = await SupportTeamMember.find(query).sort({ fullname: 1 });
+    
+    console.log(`✅ [getAllTeamMembers] Found ${members.length} members from DB`);
+    console.log(`📝 [getAllTeamMembers] Member sample:`, members[0] ? JSON.stringify(members[0], null, 2) : 'NONE');
     
     // Search filter
     if (search) {
@@ -114,7 +122,10 @@ exports.getAllTeamMembers = async (req, res) => {
         member.email.toLowerCase().includes(searchLower) ||
         member.userId.toLowerCase().includes(searchLower)
       );
+      console.log(`🔎 [getAllTeamMembers] After search filter: ${members.length} members`);
     }
+    
+    console.log(`📤 [getAllTeamMembers] Returning ${members.length} members to FE`);
     
     res.status(200).json({ 
       success: true,
@@ -124,7 +135,7 @@ exports.getAllTeamMembers = async (req, res) => {
       }
     });
   } catch (error) {
-    console.error('Error getting team members:', error);
+    console.error('❌ Error getting team members:', error);
     res.status(500).json({ 
       success: false, 
       message: error.message 

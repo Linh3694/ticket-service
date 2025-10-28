@@ -6,20 +6,18 @@ const SUPPORT_ROLES = [
   'Account', // Tài khoản
   'Camera System', // Hệ thống Camera
   'Network System', // Hệ thống mạng
-  'Bell System' // Hệ thống chuông báo
+  'Bell System', // Hệ thống chuông báo
+  'Software' // Phần mềm
 ];
 
 const supportTeamMemberSchema = new mongoose.Schema({
-  // User ID từ Frappe (email hoặc user name)
   userId: {
     type: String,
     required: true,
     unique: true,
     index: true
   },
-  
-  // Thông tin user (cache từ Frappe)
-  fullname: {
+    fullname: {
     type: String,
     required: true
   },
@@ -182,7 +180,8 @@ supportTeamMemberSchema.virtual('roleLabels').get(function() {
     'Account': 'Tài khoản',
     'Camera System': 'Hệ thống Camera',
     'Network System': 'Hệ thống mạng',
-    'Bell System': 'Hệ thống chuông báo'
+    'Bell System': 'Hệ thống chuông báo',
+    'Software': 'Phần mềm'
   };
   
   return this.roles.map(role => roleMap[role] || role);
