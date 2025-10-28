@@ -257,6 +257,60 @@ exports.getTickets = async (req, res) => {
   }
 };
 
+// b) Lấy danh sách ticket của user đang đăng nhập (creator = req.user)
+exports.getMyTickets = async (req, res) => {
+  try {
+    console.log('🎫 [getMyTickets] Fetching tickets for user:', req.user.email);
+    
+    const userId = req.user._id;
+    
+    // Lấy ticket nơi user là creator
+    const tickets = await Ticket.find({ creator: userId })
+      .sort({ createdAt: -1 })
+      .select('_id title description ticketCode status creator assignedTo priority category createdAt updatedAt')
+      .populate({
+        path: 'creator',
+        select: 'fullname email avatarUrl'
+      })
+      .populate({
+        path: 'assignedTo',
+        select: 'fullname email avatarUrl'
+      })
+      .lean();
+    
+    console.log(`✅ [getMyTickets] Found ${tickets.length} tickets for user ${req.user.email}`);
+    
+    // Format tickets cho frontend
+    const formattedTickets = tickets.map(ticket => ({
+      _id: ticket._id,
+      title: ticket.title,
+      description: ticket.description,
+      ticketCode: ticket.ticketCode,
+      status: ticket.status || 'Assigned',
+      creator: ticket.creator?.fullname || req.user.fullname,
+      creatorEmail: req.user.email,
+      assignedTo: ticket.assignedTo?.fullname || null,
+      priority: ticket.priority || 'Normal',
+      category: ticket.category || 'General',
+      createdAt: ticket.createdAt,
+      updatedAt: ticket.updatedAt
+    }));
+    
+    res.status(200).json({
+      success: true,
+      data: {
+        tickets: formattedTickets
+      }
+    });
+  } catch (error) {
+    console.error('❌ Error in getMyTickets:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+};
+
 // Lấy ticket by ID
 exports.getTicketById = async (req, res) => {
   try {
