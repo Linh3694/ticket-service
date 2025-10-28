@@ -257,6 +257,10 @@ exports.createTicket = async (req, res) => {
     // Populate creator and assignedTo for response
     await newTicket.populate('creator assignedTo', 'fullname email avatarUrl');
 
+    console.log(`📋 [createTicket] Before response:`);
+    console.log(`   assignedTo field: ${JSON.stringify(newTicket.assignedTo)}`);
+    console.log(`   creator field: ${JSON.stringify(newTicket.creator)}`);
+
     res.status(201).json({
       success: true,
       data: {
