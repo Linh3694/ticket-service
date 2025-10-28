@@ -41,7 +41,7 @@ const ticketSchema = new mongoose.Schema(
         default: "Assigned",
       },
       creator: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
-      assignedTo: { type: mongoose.Schema.Types.ObjectId, ref: "User" }, // Nhân viên hỗ trợ
+      assignedTo: { type: mongoose.Schema.Types.ObjectId, ref: "SupportTeamMember" }, // Nhân viên hỗ trợ (từ SupportTeamMember)
      
       // 📝 Timeline tracking
       createdAt: { type: Date, default: Date.now },
