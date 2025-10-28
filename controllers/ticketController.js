@@ -3,6 +3,8 @@ const SupportTeam = require("../models/SupportTeam");
 const notificationService = require('../services/notificationService');
 const mongoose = require("mongoose");
 const axios = require('axios');
+const fs = require('fs');
+const path = require('path');
 
 // Frappe API configuration
 const FRAPPE_API_URL = process.env.FRAPPE_API_URL || 'https://admin.sis.wellspring.edu.vn';
@@ -240,6 +242,41 @@ exports.createTicket = async (req, res) => {
     
     await newTicket.save();
     console.log(`✅ [createTicket] Ticket created: ${newTicket._id}`);
+    // 3️⃣ Move uploaded files from temp folder to ticket folder if any
+    if (req.files && req.files.length > 0) {
+      const tempFolder = 'uploads/Tickets/temp';
+      const ticketFolder = `uploads/Tickets/${newTicket.ticketCode}`;
+      
+      // Create ticket folder if it doesn't exist
+      if (!fs.existsSync(ticketFolder)) {
+        fs.mkdirSync(ticketFolder, { recursive: true });
+      }
+      
+      console.log(`   📁 Moving files to: ${ticketFolder}`);
+      
+      // Move each file from temp to ticket folder
+      for (const file of req.files) {
+        const oldPath = file.path;
+        const newPath = path.join(ticketFolder, file.filename);
+        
+        try {
+          fs.renameSync(oldPath, newPath);
+          console.log(`   📁 Moved: ${file.filename}`);
+          
+          // Update attachment URL in database
+          const attachmentIndex = newTicket.attachments.findIndex(a => a.url.includes(file.filename));
+          if (attachmentIndex !== -1) {
+            newTicket.attachments[attachmentIndex].url = newPath;
+          }
+        } catch (moveError) {
+          console.error(`   ⚠️  Error moving file ${file.filename}:`, moveError.message);
+        }
+      }
+      
+      // Save updated ticket with new file paths
+      await newTicket.save();
+      console.log(`   ✅ All files moved successfully`);
+    }
     
     console.log(`🔧 [createTicket] After save():`);
     console.log(`   newTicket.assignedTo: ${newTicket.assignedTo}`);
