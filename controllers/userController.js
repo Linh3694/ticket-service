@@ -43,11 +43,11 @@ async function getAllFrappeUsers(token) {
     let userList = listResponse.data.data || [];
     console.log(`✅ Found ${userList.length} users in Frappe`);
     
-    // Fetch chi tiết từng user (max 100)
-    console.log(`🔍 Fetching details for top 100 users...`);
+    // Step 2: Fetch chi tiết từng user
+    console.log(`🔍 Fetching details for all users...`);
     const detailedUsers = [];
     
-    for (const userItem of userList.slice(0, 100)) {
+    for (const userItem of userList) {  // CHANGED: from slice(0, 100) to all
       try {
         const frappe_user = await getFrappeUserDetail(userItem.name, token);
         
