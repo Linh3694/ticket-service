@@ -203,6 +203,63 @@ exports.getFrappeUsers = async (req, res) => {
   }
 };
 
+// DEBUG: Xem raw response từ Frappe
+exports.debugFrappeUsers = async (req, res) => {
+  try {
+    const token = req.header('Authorization')?.replace('Bearer ', '');
+    
+    if (!token) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Token required for debug endpoint',
+        hint: 'Add Authorization: Bearer YOUR_TOKEN header'
+      });
+    }
+    
+    console.log('🔍 [debugFrappeUsers] Calling Frappe API with token...');
+    
+    const response = await axios.get(
+      `${FRAPPE_API_URL}/api/resource/User`,
+      {
+        params: {
+          fields: JSON.stringify(['name', 'full_name', 'email', 'user_image', 'department', 'enabled', 'first_name', 'last_name']),
+          limit_page_length: 3  // Chỉ lấy 3 để debug
+        },
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'X-Frappe-CSRF-Token': token,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+    
+    console.log('📊 [debugFrappeUsers] Raw response from Frappe:');
+    console.log('Status:', response.status);
+    console.log('Data:', JSON.stringify(response.data, null, 2));
+    
+    res.status(200).json({
+      success: true,
+      debug_info: {
+        total_returned: response.data.data?.length || 0,
+        raw_response: response.data,
+        sample_user: response.data.data?.[0] || null,
+        fields_available: response.data.data?.[0] ? Object.keys(response.data.data[0]) : []
+      }
+    });
+  } catch (error) {
+    console.error('❌ [debugFrappeUsers] Error:', error.message);
+    if (error.response?.data) {
+      console.error('Response from Frappe:', error.response.data);
+    }
+    
+    res.status(error.response?.status || 500).json({
+      success: false,
+      error: error.message,
+      frappe_response: error.response?.data || null
+    });
+  }
+};
+
 // Tạo hoặc cập nhật team member
 exports.createOrUpdateTeamMember = async (req, res) => {
   try {
