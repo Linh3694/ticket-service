@@ -1,11 +1,25 @@
 const multer = require('multer');
 const path = require('path');
+const fs = require('fs');
 
 // Configure storage for ticket attachments
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    // Match mobile client path expectation: /uploads/Tickets/
-    cb(null, 'uploads/Tickets/');
+    // Determine destination based on context
+    let destFolder = 'uploads/Tickets/temp'; // Default: temporary folder
+    
+    // If ticketId is provided (update scenario), use ticket folder
+    if (req.params.ticketId) {
+      destFolder = `uploads/Tickets/${req.params.ticketId}`;
+    }
+    // For create, we'll use temp folder and move later
+    
+    // Create folder if it doesn't exist
+    if (!fs.existsSync(destFolder)) {
+      fs.mkdirSync(destFolder, { recursive: true });
+    }
+    
+    cb(null, destFolder);
   },
   filename: (req, file, cb) => {
     const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
@@ -32,4 +46,4 @@ const upload = multer({
   }
 });
 
-module.exports = upload; 
+module.exports = upload;
