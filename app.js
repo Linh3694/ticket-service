@@ -232,6 +232,33 @@ server.listen(instancePort, () => {
   console.log(`🚀 [Ticket Service] Instance ${INSTANCE_ID} running on port ${instancePort}`);
 });
 
+// Redis User Events Subscription
+async function setupRedisUserEvents() {
+  try {
+    if (process.env.ENABLE_USER_REDIS_EVENTS !== 'true') {
+      console.log('ℹ️ [Ticket Service] Redis user events disabled');
+      return;
+    }
+
+    const redis = require('./config/redis');
+    const { handleUserRedisEvent } = require('./controllers/userController');
+
+    console.log('🔗 [Ticket Service] Setting up Redis user events...');
+
+    const userChannel = process.env.REDIS_USER_CHANNEL || 'user_events';
+    await redis.subscribe(userChannel, handleUserRedisEvent);
+
+    console.log('✅ [Ticket Service] Redis user events setup complete');
+  } catch (error) {
+    console.warn('⚠️ [Ticket Service] Redis user events setup failed:', error.message);
+  }
+}
+
 connectDB();
+
+// Setup Redis user events after DB connection
+setupRedisUserEvents().catch((e) => {
+  console.error('Failed to setup Redis user events:', e);
+});
 
 module.exports = { app, io, server };

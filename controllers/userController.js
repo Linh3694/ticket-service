@@ -2,6 +2,52 @@ const axios = require('axios');
 
 const FRAPPE_API_URL = process.env.FRAPPE_API_URL || 'https://admin.sis.wellspring.edu.vn';
 
+// Redis user events handler
+const handleUserRedisEvent = async (message) => {
+  try {
+    if (process.env.DEBUG_USER_EVENTS === '1') {
+      console.log('[Ticket Service] User event received:', message?.type);
+    }
+
+    if (!message || typeof message !== 'object' || !message.type) return;
+
+    const payload = message.user || message.data || null;
+
+    switch (message.type) {
+      case 'user_created':
+      case 'user_updated':
+        if (payload) {
+          const updated = await User.updateFromFrappe(payload);
+          console.log(`✅ [Ticket Service] User synced via Redis: ${updated.email}`);
+        }
+        break;
+      case 'user_deleted':
+        if (process.env.USER_EVENT_DELETE_ENABLED === 'true' && payload) {
+          const identifier = payload?.email || message.user_id || message.name;
+          if (identifier) {
+            await User.deleteOne({ $or: [{ email: identifier }, { frappeUserId: identifier }] });
+            console.log(`🗑️ [Ticket Service] User deleted via Redis: ${identifier}`);
+          }
+        }
+        break;
+      default:
+        break;
+    }
+  } catch (err) {
+    console.error('[Ticket Service] Failed handling user Redis event:', err.message);
+  }
+};
+
+
+// Export all functions
+module.exports = {
+  handleUserRedisEvent,
+  syncAllUsers,
+  syncUsersManual,
+  syncUserByEmail,
+  webhookUserChanged
+};
+
 // Fetch user details từ Frappe
 async function getFrappeUserDetail(userEmail, token) {
   try {

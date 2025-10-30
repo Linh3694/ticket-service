@@ -171,6 +171,49 @@ userSchema.statics.findByLogin = function(identifier) {
   });
 };
 
+// Method to sync user from Frappe (pattern từ inventory-service)
+userSchema.statics.updateFromFrappe = async function updateFromFrappe(frappeUser) {
+  if (!frappeUser || typeof frappeUser !== 'object') {
+    throw new Error('Invalid Frappe user payload');
+  }
+
+  const email = frappeUser.email || frappeUser.user_id || frappeUser.username;
+  if (!email) {
+    throw new Error('User email is required');
+  }
+
+  const fullName = frappeUser.full_name || frappeUser.fullname || frappeUser.fullName ||
+    [frappeUser.first_name, frappeUser.middle_name, frappeUser.last_name].filter(Boolean).join(' ') ||
+    frappeUser.name;
+
+  const roles = Array.isArray(frappeUser.roles)
+    ? frappeUser.roles.map((r) => (typeof r === 'string' ? r : r?.role)).filter(Boolean)
+    : Array.isArray(frappeUser.roles_list)
+    ? frappeUser.roles_list
+    : [];
+
+  const update = {
+    fullname: fullName,
+    email: email,
+    avatarUrl: frappeUser.user_image || frappeUser.avatar || frappeUser.avatar_url || '',
+    department: frappeUser.department || 'Unknown',
+    jobTitle: frappeUser.job_title || frappeUser.designation || 'User',
+    roles: roles,
+    role: roles.length > 0 ? roles[0].toLowerCase() : 'user', // Legacy single role
+    disabled: frappeUser.disabled || !frappeUser.enabled,
+    active: frappeUser.enabled || !frappeUser.disabled,
+    provider: frappeUser.provider || 'frappe',
+    microsoftId: frappeUser.microsoft_id || frappeUser.microsoftId,
+    employeeCode: frappeUser.employee_code || frappeUser.employeeCode,
+    updatedAt: new Date(),
+  };
+
+  const options = { upsert: true, new: true, setDefaultsOnInsert: true };
+  const doc = await this.findOneAndUpdate({ email }, update, options);
+
+  return doc;
+};
+
 module.exports = mongoose.model("User", userSchema);
 
 
