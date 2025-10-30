@@ -56,40 +56,7 @@ async function getLocalUserIdByEmail(email) {
   }
 }
 
-// TEMPORARILY DISABLED: Azure Graph client initialization
-/*
-let graphClient = null;
-let credential = null;
-
-if (process.env.TENANT_ID && process.env.CLIENT_ID && process.env.CLIENT_SECRET) {
-  try {
-    const { ClientSecretCredential } = require("@azure/identity");
-    const { Client } = require("@microsoft/microsoft-graph-client");
-    const { TokenCredentialAuthenticationProvider } = require("@microsoft/microsoft-graph-client/authProviders/azureTokenCredentials");
-
-    // Khởi tạo OAuth 2.0 credentials
-    credential = new ClientSecretCredential(
-      process.env.TENANT_ID,
-      process.env.CLIENT_ID,
-      process.env.CLIENT_SECRET
-    );
-
-    const authProvider = new TokenCredentialAuthenticationProvider(credential, {
-      scopes: ["https://graph.microsoft.com/.default"],
-    });
-
-    graphClient = Client.initWithMiddleware({
-      authProvider: authProvider,
-    });
-
-    console.log('✅ [Ticket Service] Azure Graph client initialized');
-  } catch (error) {
-    console.warn('⚠️ [Ticket Service] Azure Graph client initialization failed:', error.message);
-  }
-} else {
-  console.warn('⚠️ [Ticket Service] Azure credentials not found, email features will be disabled');
-}
-*/
+// TEMPORARILY DISABLED: Azure Graph client initialization - Removed Microsoft dependencies
 
 // Initialize as null for now
 let graphClient = null;
