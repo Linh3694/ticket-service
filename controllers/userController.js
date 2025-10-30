@@ -1,4 +1,5 @@
 const axios = require('axios');
+const User = require('../models/Users');
 
 const FRAPPE_API_URL = process.env.FRAPPE_API_URL || 'https://admin.sis.wellspring.edu.vn';
 
@@ -138,8 +139,6 @@ exports.syncAllUsers = async (req, res) => {
       });
     }
 
-    const User = require('../models/Users');
-
     console.log('🔄 [Auto Sync] Starting...');
     const frappeUsers = await getAllFrappeUsers(token);
 
@@ -203,8 +202,6 @@ exports.syncUsersManual = async (req, res) => {
       });
     }
     
-    const User = require('../models/Users');
-    
     console.log('📝 [Manual Sync] Starting...');
     const frappeUsers = await getAllFrappeUsers(token);
     
@@ -263,8 +260,6 @@ exports.syncUserByEmail = async (req, res) => {
       });
     }
     
-    const User = require('../models/Users');
-    
     console.log(`📧 [Sync Email] Syncing user: ${email}`);
     
     const frappeUser = await getFrappeUserDetail(email, token);
@@ -317,7 +312,23 @@ exports.syncUserByEmail = async (req, res) => {
 exports.webhookUserChanged = async (req, res) => {
   try {
     const { doc, event } = req.body;
-    
+
+    // Debug webhook payload
+    if (process.env.DEBUG_WEBHOOK === '1') {
+      console.log('🔔 [Webhook] Raw payload:', JSON.stringify(req.body, null, 2));
+    }
+
+    // Handle template strings in event (fallback)
+    let actualEvent = event;
+    if (typeof event === 'string' && event.includes('{{')) {
+      // Try to extract event type from doc_event template
+      if (event === '{{ doc_event }}') {
+        actualEvent = 'update'; // Default fallback
+      }
+    }
+
+    console.log(`🔔 [Webhook] User ${actualEvent}: ${doc?.name}`);
+
     if (!doc || !doc.name) {
       return res.status(400).json({
         success: false,
@@ -325,11 +336,8 @@ exports.webhookUserChanged = async (req, res) => {
       });
     }
     
-    const User = require('../models/Users');
     
-    console.log(`🔔 [Webhook] User ${event}: ${doc.name}`);
-    
-    if (event === 'delete') {
+    if (actualEvent === 'delete' || actualEvent === 'on_trash') {
       // Xoá user khỏi local DB
       console.log(`🗑️  Deleting user: ${doc.name}`);
       await User.deleteOne({ email: doc.email });
@@ -340,7 +348,7 @@ exports.webhookUserChanged = async (req, res) => {
       });
     }
     
-    if (event === 'insert' || event === 'update') {
+    if (actualEvent === 'insert' || actualEvent === 'update' || actualEvent === 'after_insert' || actualEvent === 'on_update') {
       // Chỉ sync enabled users
       if (doc.enabled !== 1) {
         console.log(`⏭️  Skipping disabled user: ${doc.name}`);
@@ -373,7 +381,7 @@ exports.webhookUserChanged = async (req, res) => {
       
       return res.status(200).json({
         success: true,
-        message: `User ${event} synced`,
+        message: `User ${actualEvent} synced`,
         user: {
           email: result.email,
           fullname: result.fullname,
