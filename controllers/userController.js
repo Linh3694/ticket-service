@@ -39,14 +39,8 @@ const handleUserRedisEvent = async (message) => {
 };
 
 
-// Export all functions
-module.exports = {
-  handleUserRedisEvent,
-  syncAllUsers,
-  syncUsersManual,
-  syncUserByEmail,
-  webhookUserChanged
-};
+// Export Redis event handler
+module.exports.handleUserRedisEvent = handleUserRedisEvent;
 
 // Fetch user details từ Frappe
 async function getFrappeUserDetail(userEmail, token) {
@@ -131,36 +125,38 @@ function formatFrappeUser(frappeUser) {
 }
 
 // ✅ ENDPOINT 1: Auto sync all users
+// TEMPORARILY COMMENTED OUT - syncAllUsers function
+/*
 exports.syncAllUsers = async (req, res) => {
   try {
     const token = req.header('Authorization')?.replace('Bearer ', '');
-    
+
     if (!token) {
       return res.status(401).json({
         success: false,
         message: 'Token required for sync'
       });
     }
-    
+
     const User = require('../models/Users');
-    
+
     console.log('🔄 [Auto Sync] Starting...');
     const frappeUsers = await getAllFrappeUsers(token);
-    
+
     let synced = 0;
     let failed = 0;
     const syncedUsers = [];
-    
+
     for (const frappeUser of frappeUsers) {
       try {
         const userData = formatFrappeUser(frappeUser);
-        
+
         const result = await User.findOneAndUpdate(
           { email: frappeUser.email },
           userData,
           { upsert: true, new: true }
         );
-        
+
         syncedUsers.push({
           email: result.email,
           fullname: result.fullname,
@@ -172,9 +168,9 @@ exports.syncAllUsers = async (req, res) => {
         failed++;
       }
     }
-    
+
     console.log(`✅ [Auto Sync] Complete: ${synced} synced, ${failed} failed`);
-    
+
     res.status(200).json({
       success: true,
       message: 'Auto sync completed',
@@ -193,6 +189,7 @@ exports.syncAllUsers = async (req, res) => {
     });
   }
 };
+*/
 
 // ✅ ENDPOINT 2: Manual sync all
 exports.syncUsersManual = async (req, res) => {

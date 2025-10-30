@@ -56,7 +56,8 @@ async function getLocalUserIdByEmail(email) {
   }
 }
 
-// Initialize Azure Graph client only if credentials are available
+// TEMPORARILY DISABLED: Azure Graph client initialization
+/*
 let graphClient = null;
 let credential = null;
 
@@ -80,7 +81,7 @@ if (process.env.TENANT_ID && process.env.CLIENT_ID && process.env.CLIENT_SECRET)
     graphClient = Client.initWithMiddleware({
       authProvider: authProvider,
     });
-    
+
     console.log('✅ [Ticket Service] Azure Graph client initialized');
   } catch (error) {
     console.warn('⚠️ [Ticket Service] Azure Graph client initialization failed:', error.message);
@@ -88,6 +89,12 @@ if (process.env.TENANT_ID && process.env.CLIENT_ID && process.env.CLIENT_SECRET)
 } else {
   console.warn('⚠️ [Ticket Service] Azure credentials not found, email features will be disabled');
 }
+*/
+
+// Initialize as null for now
+let graphClient = null;
+let credential = null;
+console.warn('⚠️ [Ticket Service] Azure Graph client temporarily disabled');
 
 // Hàm lấy access token cho OAuth 2.0
 const getAccessToken = async () => {
