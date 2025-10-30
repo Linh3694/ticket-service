@@ -4,8 +4,8 @@ const { authenticate } = require('../middleware/authMiddleware');
 
 const router = express.Router();
 
-// 🔄 ENDPOINT 1: Auto sync all users (AUTHENTICATED)
-router.post('/sync/all', authenticate, userController.syncAllUsers);
+// 🔄 ENDPOINT 1: Auto sync all users (AUTHENTICATED) - TEMPORARILY DISABLED
+// router.post('/sync/all', authenticate, userController.syncAllUsers);
 
 // 📝 ENDPOINT 2: Manual sync all (AUTHENTICATED)
 router.post('/sync/manual', authenticate, userController.syncUsersManual);
