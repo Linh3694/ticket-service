@@ -27,7 +27,7 @@ const ticketSchema = new mongoose.Schema(
       description: String,
       category: {
         type: String,
-        enum: ["Overall", "Camera", "Network", "Bell System", "Software", "Account"],
+        enum: ["Overall", "Camera", "Network", "Bell System", "Software", "Account", "Email Ticket"],
         required: true,
       },
       priority: {
@@ -41,7 +41,7 @@ const ticketSchema = new mongoose.Schema(
         default: "Assigned",
       },
       creator: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
-      assignedTo: { type: mongoose.Schema.Types.ObjectId, ref: "SupportTeamMember" }, // Nhân viên hỗ trợ (từ SupportTeamMember)
+      assignedTo: { type: mongoose.Schema.Types.ObjectId, ref: "SupportTeamMember", required: false }, // Nhân viên hỗ trợ (từ SupportTeamMember)
      
       // 📝 Timeline tracking
       createdAt: { type: Date, default: Date.now },

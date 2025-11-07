@@ -1469,7 +1469,7 @@ exports.debugTeamMembers = async (req, res) => {
 };
 
 // Helper function to create ticket
-async function createTicketHelper({ title, description, creatorId, fallbackCreatorId = null, priority, files = [], bearerToken = null }) {
+async function createTicketHelper({ title, description, category, creatorId, fallbackCreatorId = null, priority, files = [], bearerToken = null }) {
   // 1) Tính SLA Phase 1 (4h, 8:00 - 17:00)
   const phase1Duration = 4;
   const startHour = 8;
@@ -1565,16 +1565,17 @@ async function createTicketHelper({ title, description, creatorId, fallbackCreat
     ticketCode,
     title,
     description,
+    category: category || "Email Ticket", // Default category for email tickets
     priority,
     creator: creatorObjectId,
     sla: slaPhase1Deadline,
-    assignedTo: leastAssignedUser.name,
+    assignedTo: leastAssignedUser._id, // Use SupportTeamMember ObjectId
     attachments,
     status: "Assigned",
     history: [
       {
         timestamp: new Date(),
-        action: TICKET_LOGS.MANUAL_ASSIGNED(creatorName, leastAssignedUser.fullname), // LOG sẽ tự normalize
+        action: TICKET_LOGS.MANUAL_ASSIGNED(creatorName, leastAssignedUser.fullname || leastAssignedUser.name), // LOG sẽ tự normalize
         user: creatorObjectId,
       },
     ],

@@ -215,6 +215,7 @@ exports.fetchEmailsAndCreateTickets = async (req, res) => {
         const newTicket = await ticketController.createTicketHelper({
           title: subject,
           description: plainContent,
+          category: "Email Ticket", // Category for email-generated tickets
           creatorId: creatorUser._id,
           priority: "Medium",
           files: attachments,  // Email attachments
