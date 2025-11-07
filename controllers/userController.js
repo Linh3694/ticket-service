@@ -68,9 +68,10 @@ async function getAllFrappeUsers(token) {
     console.log('🔍 [Sync] Fetching all Frappe users...');
     
     // Paginate để lấy TẤT CẢ users
+    // Frappe có thể có giới hạn mặc định là 20 users/page, nên dùng 20 để đảm bảo
     const allUsers = [];
     let start = 0;
-    const pageLength = 1000; // Lấy nhiều nhất có thể mỗi page
+    const pageLength = 20; // Frappe có thể giới hạn mặc định là 20
     let hasMore = true;
     
     while (hasMore) {
@@ -91,26 +92,28 @@ async function getAllFrappeUsers(token) {
       );
       
       const userList = listResponse.data.data || [];
-      const totalCount = listResponse.data.total_count || listResponse.data.total || userList.length;
+      const totalCount = listResponse.data.total_count || listResponse.data.total;
       
-      console.log(`📦 Page ${Math.floor(start / pageLength) + 1}: Found ${userList.length} users (Total in Frappe: ${totalCount}, limit_start: ${start})`);
+      console.log(`📦 Page ${Math.floor(start / pageLength) + 1}: Found ${userList.length} users (limit_start: ${start}, limit_page_length: ${pageLength})`);
+      if (totalCount) {
+        console.log(`   📊 Reported total_count: ${totalCount} (may be inaccurate)`);
+      }
       
       if (userList.length === 0) {
+        console.log(`✅ No more users found, stopping pagination`);
         hasMore = false;
       } else {
         allUsers.push(...userList);
         
-        // Kiểm tra xem đã lấy hết chưa
-        if (allUsers.length >= totalCount) {
-          console.log(`✅ Reached total count: ${allUsers.length} >= ${totalCount}`);
-          hasMore = false;
-        } else if (userList.length < pageLength) {
+        // KHÔNG tin vào total_count - tiếp tục paginate cho đến khi không còn data
+        if (userList.length < pageLength) {
           // Nếu số users trả về ít hơn pageLength, đã hết data
           console.log(`✅ Last page reached (returned ${userList.length} < ${pageLength})`);
           hasMore = false;
         } else {
-          // Tiếp tục fetch page tiếp theo
+          // Tiếp tục fetch page tiếp theo (bỏ qua total_count vì có thể không chính xác)
           start += pageLength;
+          console.log(`   ➡️  Continuing to next page (start: ${start})`);
         }
       }
     }
