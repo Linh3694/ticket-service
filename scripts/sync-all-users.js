@@ -44,7 +44,18 @@ if (!token) {
 
 const syncAllUsers = async () => {
   try {
-    const url = `${baseURL}/api/ticket/user/sync/manual`;
+    // Build URL with query parameters
+    let url = `${baseURL}/api/ticket/user/sync/manual`;
+    const params = [];
+    if (includeList) {
+      params.push('include_list=true');
+    }
+    if (listLimit) {
+      params.push(`list_limit=${listLimit}`);
+    }
+    if (params.length > 0) {
+      url += '?' + params.join('&');
+    }
     
     console.log('🔄 Starting Enabled User Sync...');
     console.log(`URL: ${url} (enabled users only)`);
@@ -67,22 +78,37 @@ const syncAllUsers = async () => {
       console.log('✅ Sync completed successfully!');
       
       if (data.stats) {
-        const { synced, failed, total } = data.stats;
+        const { synced, failed, total, user_type_breakdown } = data.stats;
         console.log(`📊 Stats:`);
         console.log(`   ✅ Synced: ${synced}`);
         console.log(`   ❌ Failed: ${failed}`);
         console.log(`   📋 Total:  ${total}`);
+        
+        if (user_type_breakdown) {
+          console.log('');
+          console.log(`📊 User Type Breakdown:`);
+          console.log(`   - System Users: ${user_type_breakdown['System User'] || 0}`);
+          console.log(`   - Website Users: ${user_type_breakdown['Website User'] || 0}`);
+          console.log(`   - Other: ${user_type_breakdown['Other'] || 0}`);
+        }
       }
       
-      if (data.synced_users && data.synced_users.length > 0) {
+      // Show synced users list
+      const usersList = data.synced_users || data.synced_users_sample || [];
+      if (usersList.length > 0) {
         console.log('');
-        console.log('📝 Synced Users:');
-        data.synced_users.forEach((user, idx) => {
-          console.log(`   ${idx + 1}. ${user.fullname} (${user.email})`);
+        console.log(`📝 Synced Users (${data.synced_users_total || usersList.length} total):`);
+        usersList.forEach((user, idx) => {
+          console.log(`   ${idx + 1}. ${user.fullname || user.email} (${user.email}) [${user.userType || 'Unknown'}]`);
           if (user.roles && user.roles.length > 0) {
             console.log(`      Roles: ${user.roles.join(', ')}`);
           }
         });
+        
+        if (data.synced_users_note) {
+          console.log('');
+          console.log(`ℹ️  ${data.synced_users_note}`);
+        }
       }
     } else {
       console.log(`❌ Sync failed: ${data.message}`);
