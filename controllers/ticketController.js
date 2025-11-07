@@ -1392,7 +1392,21 @@ exports.getTicketMessages = async (req, res) => {
       (ticket.messages || []).map(async (message) => {
         const processedMessage = message.toObject ? message.toObject() : message;
 
-        // Nếu không có avatar URL, thử lấy từ Frappe
+        // Check if user has avatarUrl in local database first
+        console.log('🔍 Checking avatar for user:', processedMessage.sender.email, 'Current avatarUrl:', processedMessage.sender?.avatarUrl);
+
+        // Always try to get fresh avatar from database (in case it was updated)
+        try {
+          const userFromDB = await User.findById(processedMessage.sender._id).select('avatarUrl');
+          if (userFromDB && userFromDB.avatarUrl) {
+            processedMessage.sender.avatarUrl = userFromDB.avatarUrl;
+            console.log('📥 Got avatar from local DB:', userFromDB.avatarUrl);
+          }
+        } catch (dbError) {
+          console.error('Error fetching user from DB:', dbError);
+        }
+
+        // Nếu vẫn không có avatar URL, thử lấy từ Frappe
         if (!processedMessage.sender?.avatarUrl && processedMessage.sender?.email) {
           try {
             console.log('🔍 Fetching avatar for user:', processedMessage.sender.email);
@@ -1438,7 +1452,10 @@ exports.getTicketMessages = async (req, res) => {
                 await User.findByIdAndUpdate(processedMessage.sender._id, {
                   avatarUrl: fullAvatarUrl
                 });
+
+                // Update processed message immediately
                 processedMessage.sender.avatarUrl = fullAvatarUrl;
+                console.log('✅ Updated processedMessage avatarUrl to:', fullAvatarUrl);
               } else {
                 console.log('⚠️ No avatar fields found in Frappe user data');
               }
