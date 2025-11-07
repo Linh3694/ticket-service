@@ -62,24 +62,25 @@ async function getFrappeUserDetail(userEmail, token) {
   }
 }
 
-// Fetch all users từ Frappe
+// Fetch enabled users từ Frappe (chỉ lấy users đang active)
 async function getAllFrappeUsers(token) {
   try {
-    console.log('🔍 [Sync] Fetching all Frappe users...');
-    
-    // Paginate để lấy TẤT CẢ users
-    // Frappe có thể có giới hạn mặc định là 20 users/page, nên dùng 20 để đảm bảo
+    console.log('🔍 [Sync] Fetching enabled Frappe users only...');
+
+    // Paginate để lấy TẤT CẢ enabled users
+    // Thêm filter enabled=1 để chỉ lấy users đang active
     const allUsers = [];
     let start = 0;
     const pageLength = 20; // Frappe có thể giới hạn mặc định là 20
     let hasMore = true;
-    
+
     while (hasMore) {
       const listResponse = await axios.get(
         `${FRAPPE_API_URL}/api/resource/User`,
         {
           params: {
             fields: JSON.stringify(['name', 'email', 'full_name', 'user_image', 'enabled', 'location', 'roles']),
+            filters: JSON.stringify([['enabled', '=', 1]]), // Chỉ lấy enabled users
             limit_start: start,
             limit_page_length: pageLength,
             order_by: 'name asc'
@@ -90,21 +91,21 @@ async function getAllFrappeUsers(token) {
           }
         }
       );
-      
+
       const userList = listResponse.data.data || [];
       const totalCount = listResponse.data.total_count || listResponse.data.total;
-      
-      console.log(`📦 Page ${Math.floor(start / pageLength) + 1}: Found ${userList.length} users (limit_start: ${start}, limit_page_length: ${pageLength})`);
+
+      console.log(`📦 Page ${Math.floor(start / pageLength) + 1}: Found ${userList.length} enabled users (limit_start: ${start}, limit_page_length: ${pageLength})`);
       if (totalCount) {
-        console.log(`   📊 Reported total_count: ${totalCount} (may be inaccurate)`);
+        console.log(`   📊 Reported total_count: ${totalCount} (enabled users only)`);
       }
-      
+
       if (userList.length === 0) {
-        console.log(`✅ No more users found, stopping pagination`);
+        console.log(`✅ No more enabled users found, stopping pagination`);
         hasMore = false;
       } else {
         allUsers.push(...userList);
-        
+
         // KHÔNG tin vào total_count - tiếp tục paginate cho đến khi không còn data
         if (userList.length < pageLength) {
           // Nếu số users trả về ít hơn pageLength, đã hết data
@@ -117,9 +118,9 @@ async function getAllFrappeUsers(token) {
         }
       }
     }
-    
-    console.log(`✅ Found total ${allUsers.length} users in Frappe (all users, including disabled)`);
-    
+
+    console.log(`✅ Found total ${allUsers.length} enabled users in Frappe`);
+
     // Tối ưu: Sử dụng data từ list API luôn (đã có đủ fields cần thiết)
     // Roles sẽ được update sau qua webhook hoặc khi user login
     // Nếu list API không có roles, sẽ là empty array và sẽ được update sau
@@ -135,8 +136,8 @@ async function getAllFrappeUsers(token) {
         roles: user.roles || [] // Có thể là empty nếu list API không trả về
       };
     });
-    
-    console.log(`✅ Using ${detailedUsers.length} users from list API (roles will be updated via webhook)`);
+
+    console.log(`✅ Using ${detailedUsers.length} enabled users from list API (roles will be updated via webhook)`);
     return detailedUsers;
   } catch (error) {
     console.error('❌ Error fetching Frappe users:', error.message);
