@@ -1780,3 +1780,73 @@ exports.reopenTicket = async (req, res) => {
     });
   }
 };
+
+/**
+ * 📊 Lấy feedback stats cho team member
+ * GET /feedback-stats/:email
+ */
+exports.getTeamMemberFeedbackStats = async (req, res) => {
+  try {
+    const { email } = req.params;
+
+    console.log(`📊 [getTeamMemberFeedbackStats] Fetching stats for: ${email}`);
+
+    // Lấy tất cả tickets của team member này với feedback
+    const tickets = await Ticket.find({
+      'assignedTo.email': email,
+      'feedback.rating': { $exists: true, $ne: null },
+      status: 'Closed'
+    });
+
+    if (tickets.length === 0) {
+      return res.status(200).json({
+        success: true,
+        data: {
+          averageRating: 0,
+          totalFeedbacks: 0,
+          badges: [],
+          badgeCounts: {}
+        }
+      });
+    }
+
+    // Tính trung bình rating
+    const totalRating = tickets.reduce((sum, t) => sum + (t.feedback?.rating || 0), 0);
+    const averageRating = totalRating / tickets.length;
+
+    // Tính tổng huy hiệu
+    const badgeCounts = {};
+    const uniqueBadges = [];
+
+    tickets.forEach(ticket => {
+      if (ticket.feedback?.badges && Array.isArray(ticket.feedback.badges)) {
+        ticket.feedback.badges.forEach(badge => {
+          if (!badgeCounts[badge]) {
+            badgeCounts[badge] = 0;
+            uniqueBadges.push(badge);
+          }
+          badgeCounts[badge]++;
+        });
+      }
+    });
+
+    console.log(`✅ [getTeamMemberFeedbackStats] Stats: avg rating=${averageRating.toFixed(2)}, total feedbacks=${tickets.length}, badges=${uniqueBadges.join(', ')}`);
+
+    res.status(200).json({
+      success: true,
+      data: {
+        averageRating: parseFloat(averageRating.toFixed(2)),
+        totalFeedbacks: tickets.length,
+        badges: uniqueBadges,
+        badgeCounts
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Error in getTeamMemberFeedbackStats:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Lỗi khi lấy feedback stats'
+    });
+  }
+};

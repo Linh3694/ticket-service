@@ -21,6 +21,7 @@ router.post("/support-team/remove-user", ticketController.removeUserFromSupportT
 router.get("/my-tickets", authenticate, ticketController.getMyTickets);
 router.get("/", authenticate, ticketController.getTickets);
 router.get("/me", authenticate, ticketController.getMe);
+router.get("/feedback-stats/:email", ticketController.getTeamMemberFeedbackStats);
 
 // Dynamic routes with :ticketId (MUST be last!)
 router.get("/:ticketId", authenticate, ticketController.getTicketById);
