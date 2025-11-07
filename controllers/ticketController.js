@@ -1791,12 +1791,32 @@ exports.getTeamMemberFeedbackStats = async (req, res) => {
 
     console.log(`📊 [getTeamMemberFeedbackStats] Fetching stats for: ${email}`);
 
+    // Tìm SupportTeamMember từ email
+    const SupportTeamMember = require('../models/SupportTeamMember');
+    const teamMember = await SupportTeamMember.findOne({ email });
+
+    if (!teamMember) {
+      console.log(`⚠️  [getTeamMemberFeedbackStats] Team member not found for email: ${email}`);
+      return res.status(200).json({
+        success: true,
+        data: {
+          averageRating: 0,
+          totalFeedbacks: 0,
+          badges: [],
+          badgeCounts: {}
+        }
+      });
+    }
+
     // Lấy tất cả tickets của team member này với feedback
+    // assignedTo là ObjectId, nên query trực tiếp
     const tickets = await Ticket.find({
-      'assignedTo.email': email,
+      assignedTo: teamMember._id,
       'feedback.rating': { $exists: true, $ne: null },
       status: 'Closed'
-    });
+    }).lean();
+
+    console.log(`📋 [getTeamMemberFeedbackStats] Found ${tickets.length} closed tickets with feedback for ${email}`);
 
     if (tickets.length === 0) {
       return res.status(200).json({
