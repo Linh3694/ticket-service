@@ -102,6 +102,7 @@ async function getAllFrappeUsers(token) {
       );
 
       const userList = listResponse.data.data || [];
+      console.log(`   📄 Page fetched: ${userList.length} users (start: ${start})`);
 
       if (userList.length === 0) {
         hasMore = false;
@@ -135,13 +136,16 @@ async function getAllFrappeUsers(token) {
           return true;
         });
 
+        console.log(`   ✅ Kept ${enabledUsers.length}/${userList.length} users after filter`);
         allUsers.push(...enabledUsers);
 
         // Check if we've reached the last page
         if (userList.length < pageLength) {
+          console.log(`   🏁 Last page (${userList.length} < ${pageLength})`);
           hasMore = false;
         } else {
           start += pageLength;
+          console.log(`   ➡️  Fetching next page (start: ${start})...`);
         }
       }
       
@@ -343,7 +347,7 @@ exports.syncUsersManual = async (req, res) => {
           
           return { 
             email: userEmail, 
-            userType: frappeUser.user_type || 'Unknown'
+            userType: frappeUser.user_type || 'Other'
           };
         })
       );
@@ -353,7 +357,11 @@ exports.syncUsersManual = async (req, res) => {
         if (result.status === 'fulfilled') {
           synced++;
           const userType = result.value.userType;
-          userTypeStats[userType] = (userTypeStats[userType] || 0) + 1;
+          if (userTypeStats.hasOwnProperty(userType)) {
+            userTypeStats[userType]++;
+          } else {
+            userTypeStats['Other']++;
+          }
         } else {
           failed++;
         }
