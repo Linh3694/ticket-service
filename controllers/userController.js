@@ -245,25 +245,44 @@ async function getAllFrappeUsers(token) {
           // Trong Frappe, User.name thường là email, nếu email field không có thì dùng name
           const finalEmail = userDetail.email || user.email || user.name || '';
           
-          // Normalize roles từ detail API
-          // Roles có thể là array hoặc child table trong Frappe
-          let normalizedRoles = [];
-          if (Array.isArray(userDetail.roles)) {
-            normalizedRoles = userDetail.roles.map((r) => 
-              typeof r === 'string' ? r : (r?.role || r?.name || r)
-            ).filter(Boolean);
-          } else if (userDetail.roles && typeof userDetail.roles === 'object') {
-            // Nếu roles là object, có thể là child table
-            const rolesArray = Object.values(userDetail.roles);
-            normalizedRoles = rolesArray.map((r) => 
-              typeof r === 'string' ? r : (r?.role || r?.name || r)
-            ).filter(Boolean);
+          // Debug: Log structure của userDetail để xem roles có format như thế nào (chỉ log 1 user đầu tiên)
+          if (i === 0 && batchNumber === 1) {
+            console.log(`🔍 [Debug] User detail API response structure for ${finalEmail}:`);
+            console.log(`   - Has roles field: ${!!userDetail.roles}`);
+            console.log(`   - Roles type: ${typeof userDetail.roles}`);
+            console.log(`   - Roles is array: ${Array.isArray(userDetail.roles)}`);
+            if (userDetail.roles) {
+              console.log(`   - Roles value: ${JSON.stringify(userDetail.roles).substring(0, 200)}`);
+            }
+            // Log tất cả keys để xem có field nào khác chứa roles không
+            console.log(`   - All keys: ${Object.keys(userDetail).join(', ')}`);
           }
           
-          // Nếu vẫn không có roles, thử fetch từ Has Role API hoặc API method
-          if (normalizedRoles.length === 0) {
+          // Normalize roles từ detail API
+          // Roles có thể là array hoặc child table trong Frappe (Table field với options="Has Role")
+          let normalizedRoles = [];
+          if (Array.isArray(userDetail.roles)) {
+            // Nếu là array, có thể là array of objects hoặc array of strings
+            normalizedRoles = userDetail.roles.map((r) => {
+              if (typeof r === 'string') return r;
+              // Nếu là object, có thể có field 'role' hoặc 'name'
+              return r?.role || r?.name || (typeof r === 'object' ? JSON.stringify(r) : String(r));
+            }).filter(Boolean);
+          } else if (userDetail.roles && typeof userDetail.roles === 'object') {
+            // Nếu roles là object, có thể là child table format
+            // Thử parse như object với keys là indices
+            const rolesArray = Object.values(userDetail.roles);
+            normalizedRoles = rolesArray.map((r) => {
+              if (typeof r === 'string') return r;
+              return r?.role || r?.name || String(r);
+            }).filter(Boolean);
+          }
+          
+          // Nếu vẫn không có roles và không phải là batch đầu tiên (để tránh spam log), thử fetch từ Has Role
+          // Nhưng skip nếu đã có quá nhiều lỗi để tránh làm chậm sync
+          if (normalizedRoles.length === 0 && (i < 100 || Math.random() < 0.1)) {
             try {
-              // Thử query Has Role table để lấy roles
+              // Thử query Has Role table để lấy roles (chỉ thử một vài users để tránh spam)
               const hasRoleResponse = await axios.get(
                 `${FRAPPE_API_URL}/api/resource/Has Role`,
                 {
@@ -288,30 +307,11 @@ async function getAllFrappeUsers(token) {
                   .filter(Boolean);
               }
             } catch (rolesErr) {
-              // Nếu query Has Role fail, thử API method
-              try {
-                const rolesMethodResponse = await axios.get(
-                  `${FRAPPE_API_URL}/api/method/erp.api.erp_common_user.user_management.get_user_roles`,
-                  {
-                    params: {
-                      user_email: finalEmail
-                    },
-                    headers: {
-                      'Authorization': `Bearer ${token}`,
-                      'X-Frappe-CSRF-Token': token
-                    }
-                  }
-                );
-                
-                if (rolesMethodResponse.data && rolesMethodResponse.data.message && rolesMethodResponse.data.message.roles) {
-                  normalizedRoles = Array.isArray(rolesMethodResponse.data.message.roles) 
-                    ? rolesMethodResponse.data.message.roles 
-                    : [];
-                }
-              } catch (methodErr) {
-                // Ignore, roles sẽ được update sau qua webhook hoặc khi user login
-                console.warn(`⚠️  [Sync] Could not fetch roles for ${finalEmail}: ${methodErr.message}`);
+              // Chỉ log warning cho một vài users đầu tiên để tránh spam
+              if (i < 10) {
+                console.warn(`⚠️  [Sync] Could not fetch roles from Has Role API for ${finalEmail}: ${rolesErr.message}`);
               }
+              // Không thử API method nữa vì nó cũng đang fail với 500
             }
           }
           
@@ -955,17 +955,36 @@ exports.webhookUserChanged = async (req, res) => {
     
     if (actualEvent === 'insert' || actualEvent === 'update' || actualEvent === 'after_insert' || actualEvent === 'on_update') {
       // Chỉ sync enabled users (active users)
-      // In Frappe, users with docstatus = 0 are considered enabled (active)
-      const isEnabled = doc.docstatus === 0;
+      // Check disabled field first (nếu disabled = true thì chắc chắn không enabled)
+      if (doc.disabled === true || doc.disabled === 1 || doc.disabled === "1") {
+        console.log(`⏭️  Skipping disabled user: ${doc.name} (disabled: ${doc.disabled})`);
+        return res.status(200).json({
+          success: true,
+          message: 'User is disabled, skipped'
+        });
+      }
+      
+      // Check enabled field (ưu tiên cao nhất nếu có)
+      let isEnabled = true; // Default to enabled if no status info
+      if (doc.enabled !== undefined && doc.enabled !== null) {
+        isEnabled = doc.enabled === 1 || doc.enabled === true || doc.enabled === "1";
+      } else if (doc.docstatus !== undefined && doc.docstatus !== null) {
+        // Fallback: check docstatus (0 = active/draft)
+        isEnabled = doc.docstatus === 0;
+      }
+      
       if (!isEnabled) {
-        console.log(`⏭️  Skipping inactive user: ${doc.name} (docstatus: ${doc.docstatus})`);
+        console.log(`⏭️  Skipping inactive user: ${doc.name} (enabled: ${doc.enabled}, docstatus: ${doc.docstatus})`);
         return res.status(200).json({
           success: true,
           message: 'User is not active, skipped'
         });
       }
       
-      const frappe_roles = doc.roles?.map(r => r.role) || [];
+      // Normalize roles: có thể là array of strings hoặc array of objects
+      const frappe_roles = Array.isArray(doc.roles)
+        ? doc.roles.map(r => typeof r === 'string' ? r : r?.role).filter(Boolean)
+        : [];
       
       const userData = {
         email: doc.email,
