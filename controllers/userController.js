@@ -178,8 +178,8 @@ async function getAllFrappeUsers(token) {
 // Format Frappe user → Users model
 function formatFrappeUser(frappeUser) {
   const frappe_roles = frappeUser.roles?.map(r => r.role) || [];
-  // In Frappe, users are enabled when disabled=0/"0"/false or disabled is null/undefined
-  const isEnabled = frappeUser.disabled === 0 || frappeUser.disabled === "0" || frappeUser.disabled === false || frappeUser.disabled === null || frappeUser.disabled === undefined;
+  // In Frappe, System Users are considered enabled
+  const isEnabled = frappeUser.user_type === 'System User';
 
   return {
     email: frappeUser.email,
@@ -491,12 +491,12 @@ exports.syncUserByEmail = async (req, res) => {
       });
     }
     
-    // In Frappe, users are enabled when disabled=0/"0"/false or disabled is null/undefined
-    const isEnabled = frappeUser.disabled === 0 || frappeUser.disabled === "0" || frappeUser.disabled === false || frappeUser.disabled === null || frappeUser.disabled === undefined;
+    // In Frappe, only System Users are considered enabled
+    const isEnabled = frappeUser.user_type === 'System User';
     if (!isEnabled) {
       return res.status(400).json({
         success: false,
-        message: `User is disabled in Frappe: ${email}`
+        message: `User is not a system user in Frappe: ${email}`
       });
     }
     
@@ -571,14 +571,14 @@ exports.webhookUserChanged = async (req, res) => {
     }
     
     if (actualEvent === 'insert' || actualEvent === 'update' || actualEvent === 'after_insert' || actualEvent === 'on_update') {
-      // Chỉ sync enabled users (not disabled)
-      // In Frappe, users are enabled when disabled=0/"0"/false or disabled is null/undefined
-      const isEnabled = doc.disabled === 0 || doc.disabled === "0" || doc.disabled === false || doc.disabled === null || doc.disabled === undefined;
+      // Chỉ sync enabled users (System Users)
+      // In Frappe, only System Users are considered enabled
+      const isEnabled = doc.user_type === 'System User';
       if (!isEnabled) {
-        console.log(`⏭️  Skipping disabled user: ${doc.name} (disabled: ${doc.disabled}, type: ${typeof doc.disabled})`);
+        console.log(`⏭️  Skipping non-system user: ${doc.name} (user_type: ${doc.user_type})`);
         return res.status(200).json({
           success: true,
-          message: 'User is disabled, skipped'
+          message: 'User is not a system user, skipped'
         });
       }
       
