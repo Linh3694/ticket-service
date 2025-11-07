@@ -195,7 +195,7 @@ userSchema.statics.updateFromFrappe = async function updateFromFrappe(frappeUser
   const update = {
     fullname: fullName,
     email: email,
-    avatarUrl: frappeUser.user_image || frappeUser.avatar || frappeUser.avatar_url || '',
+    avatarUrl: frappeUser.user_image || frappeUser.userImage || frappeUser.avatar || frappeUser.avatar_url || '',
     department: frappeUser.department || 'Unknown',
     jobTitle: frappeUser.job_title || frappeUser.designation || 'User',
     roles: roles,
