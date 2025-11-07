@@ -16,7 +16,7 @@ require('dotenv').config();
 const mongoose = require('mongoose');
 
 // MongoDB connection
-const MONGO_URI = process.env.MONGO_URI || 'mongodb://localhost:27017/ticket-service';
+const MONGO_URI = process.env.MONGO_URI || 'mongodb://localhost:27017/wellspring_tickets';
 
 async function migrate() {
   try {
