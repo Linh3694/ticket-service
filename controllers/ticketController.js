@@ -1147,15 +1147,23 @@ exports.sendMessage = async (req, res) => {
         select: "fullname avatarUrl email",
       });
 
+    // Process the last message to ensure avatar URL
     const lastMessage = updatedTicket.messages[updatedTicket.messages.length - 1];
+    let processedLastMessage = lastMessage.toObject ? lastMessage.toObject() : lastMessage;
+
+    // Ensure avatar URL is processed
+    if (processedLastMessage.sender?.avatarUrl && processedLastMessage.sender.avatarUrl.startsWith('/files/')) {
+      processedLastMessage.sender.avatarUrl = `${FRAPPE_API_URL}${processedLastMessage.sender.avatarUrl}`;
+    }
+
     const io = req.app.get("io");
 
     const messageData = {
-      _id: lastMessage._id,
-      text: lastMessage.text,
-      sender: lastMessage.sender,
-      timestamp: lastMessage.timestamp,
-      type: lastMessage.type,
+      _id: processedLastMessage._id,
+      text: processedLastMessage.text,
+      sender: processedLastMessage.sender,
+      timestamp: processedLastMessage.timestamp,
+      type: processedLastMessage.type,
       ticketId: ticketId,
       tempId: req.body.tempId || null,
     };
@@ -1172,7 +1180,7 @@ exports.sendMessage = async (req, res) => {
       message: statusChanged
         ? "Tin nhắn đã được gửi và trạng thái ticket đã được cập nhật"
         : "Tin nhắn đã được gửi thành công",
-      messageData: messageData,
+      messageData: processedLastMessage,
       ticket: updatedTicket,
       statusChanged: statusChanged,
       oldStatus: oldStatus,
@@ -1358,17 +1366,13 @@ exports.getSubTasksByTicket = async (req, res) => {
 exports.getTicketMessages = async (req, res) => {
   try {
     const { ticketId } = req.params;
-    const page = parseInt(req.query.page, 10) || 1;
-    const limit = parseInt(req.query.limit, 10) || 20;
-    const skip = (page - 1) * limit;
 
     const ticket = await Ticket.findById(ticketId)
       .populate({
         path: 'messages.sender',
         model: 'User',
         select: 'fullname avatarUrl email',
-      })
-      .lean();
+      });
 
     if (!ticket) {
       return res.status(404).json({ success: false, message: 'Ticket không tồn tại' });
@@ -1383,22 +1387,88 @@ exports.getTicketMessages = async (req, res) => {
       return res.status(403).json({ success: false, message: 'Bạn không có quyền xem trao đổi của ticket này' });
     }
 
-    const total = Array.isArray(ticket.messages) ? ticket.messages.length : 0;
-    const sliceStart = Math.max(total - skip - limit, 0);
-    const sliceEnd = Math.max(total - skip, 0);
-    const pageMessages = (ticket.messages || []).slice(sliceStart, sliceEnd);
+    // Process messages để đảm bảo có avatar URL
+    const processedMessages = await Promise.all(
+      (ticket.messages || []).map(async (message) => {
+        const processedMessage = message.toObject ? message.toObject() : message;
+
+        // Nếu không có avatar URL, thử lấy từ Frappe
+        if (!processedMessage.sender?.avatarUrl && processedMessage.sender?.email) {
+          try {
+            console.log('🔍 Fetching avatar for user:', processedMessage.sender.email);
+
+            // Thử nhiều cách khác nhau để authenticate
+            const authHeaders = {};
+            if (req.headers.authorization) {
+              authHeaders['Authorization'] = req.headers.authorization;
+            }
+            if (req.headers['x-frappe-csrf-token']) {
+              authHeaders['X-Frappe-CSRF-Token'] = req.headers['x-frappe-csrf-token'];
+            }
+
+            const response = await axios.get(`${FRAPPE_API_URL}/api/resource/User?filters=[["email","=","${processedMessage.sender.email}"]]`, {
+              headers: authHeaders,
+              timeout: 5000 // 5 second timeout
+            });
+
+            console.log('📡 Frappe API response status:', response.status);
+            console.log('📡 Frappe API response data:', JSON.stringify(response.data, null, 2));
+
+            if (response.data.data && response.data.data.length > 0) {
+              const frappeUser = response.data.data[0];
+              console.log('👤 Frappe user data keys:', Object.keys(frappeUser));
+
+              // Thử nhiều field names có thể chứa avatar
+              const possibleAvatarFields = ['user_image', 'avatar_url', 'avatar', 'photo', 'user_photo', 'picture'];
+              let avatarUrl = null;
+
+              for (const field of possibleAvatarFields) {
+                if (frappeUser[field]) {
+                  avatarUrl = frappeUser[field];
+                  console.log(`🖼️ Found avatar in field '${field}':`, avatarUrl);
+                  break;
+                }
+              }
+
+              // Update local user avatar if found
+              if (avatarUrl) {
+                const fullAvatarUrl = avatarUrl.startsWith('/files/') ? `${FRAPPE_API_URL}${avatarUrl}` : avatarUrl;
+                console.log('💾 Updating local user avatar to:', fullAvatarUrl);
+
+                await User.findByIdAndUpdate(processedMessage.sender._id, {
+                  avatarUrl: fullAvatarUrl
+                });
+                processedMessage.sender.avatarUrl = fullAvatarUrl;
+              } else {
+                console.log('⚠️ No avatar fields found in Frappe user data');
+              }
+            } else {
+              console.log('❌ No user found in Frappe for email:', processedMessage.sender.email);
+            }
+          } catch (error) {
+            console.error('❌ Error fetching user avatar from Frappe:', error.message);
+            if (error.response) {
+              console.error('Response status:', error.response.status);
+              console.error('Response data:', error.response.data);
+            }
+          }
+        }
+
+        // Đảm bảo avatar URL có full URL nếu là relative path
+        if (processedMessage.sender?.avatarUrl && processedMessage.sender.avatarUrl.startsWith('/files/')) {
+          processedMessage.sender.avatarUrl = `${FRAPPE_API_URL}${processedMessage.sender.avatarUrl}`;
+        }
+
+        return processedMessage;
+      })
+    );
 
     return res.status(200).json({
       success: true,
-      messages: pageMessages,
-      pagination: {
-        page,
-        limit,
-        hasMore: sliceStart > 0,
-        total,
-      },
+      messages: processedMessages,
     });
   } catch (error) {
+    console.error('Error getting ticket messages:', error);
     return res.status(500).json({ success: false, message: error.message });
   }
 };
