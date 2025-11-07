@@ -59,14 +59,37 @@ function buildFrappeHeaders() {
 }
 
 // Helper function to get user avatar URL from Frappe
-async function getUserAvatarFromFrappe(userEmail) {
+async function getUserAvatarFromFrappe(userEmail, frappeToken = null) {
   try {
-    const headers = buildFrappeHeaders();
+    // Build headers - prefer JWT token from request, fallback to API key/secret
+    const headers = {
+      'Content-Type': 'application/json',
+      'Accept': 'application/json'
+    };
+    
+    // Use JWT token from request if available
+    if (frappeToken) {
+      headers['Authorization'] = `Bearer ${frappeToken}`;
+      headers['X-Frappe-CSRF-Token'] = frappeToken;
+    } else {
+      // Fallback to API key/secret (if configured)
+      if (process.env.FRAPPE_API_KEY && 
+          process.env.FRAPPE_API_KEY !== 'your_frappe_api_key' &&
+          process.env.FRAPPE_API_SECRET &&
+          process.env.FRAPPE_API_SECRET !== 'your_frappe_api_secret') {
+        headers['Authorization'] = `token ${process.env.FRAPPE_API_KEY}:${process.env.FRAPPE_API_SECRET}`;
+      } else {
+        console.debug(`Skipping Frappe avatar fetch - no valid token or credentials for user ${userEmail}`);
+        return '';
+      }
+    }
+    
     const response = await axios.get(`${FRAPPE_API_URL}/api/resource/User/${userEmail}`, {
       params: {
         fields: JSON.stringify(['user_image', 'name', 'email'])
       },
-      headers
+      headers,
+      timeout: 3000 // 3 second timeout to avoid hanging
     });
     
     if (response.data?.data?.user_image) {
@@ -74,33 +97,44 @@ async function getUserAvatarFromFrappe(userEmail) {
     }
     return '';
   } catch (error) {
-    console.error(`Error getting avatar for user ${userEmail}:`, error.message);
+    console.debug(`Note: Could not fetch avatar from Frappe for ${userEmail}: ${error.message}`);
     return '';
   }
 }
 
+// Simple in-memory cache for avatar URLs (reset on server restart)
+const avatarCache = new Map();
+
 // Helper function to enrich ticket with user avatars from Frappe
-async function enrichTicketWithAvatars(ticket) {
+async function enrichTicketWithAvatars(ticket, frappeToken = null) {
   if (!ticket) return ticket;
   
   try {
-    // Fetch avatar for creator if missing
-    if (ticket.creator && !ticket.creator.avatarUrl) {
-      const creatorAvatar = await getUserAvatarFromFrappe(ticket.creator.email);
+    // Fetch avatar for creator if missing or empty
+    if (ticket.creator && ticket.creator.email && (!ticket.creator.avatarUrl || ticket.creator.avatarUrl === '')) {
+      let creatorAvatar = avatarCache.get(ticket.creator.email);
+      if (creatorAvatar === undefined) {
+        creatorAvatar = await getUserAvatarFromFrappe(ticket.creator.email, frappeToken);
+        avatarCache.set(ticket.creator.email, creatorAvatar || '');
+      }
       if (creatorAvatar) {
         ticket.creator.avatarUrl = creatorAvatar;
       }
     }
     
-    // Fetch avatar for assignedTo if missing
-    if (ticket.assignedTo && !ticket.assignedTo.avatarUrl) {
-      const assignedToAvatar = await getUserAvatarFromFrappe(ticket.assignedTo.email);
+    // Fetch avatar for assignedTo if missing or empty
+    if (ticket.assignedTo && ticket.assignedTo.email && (!ticket.assignedTo.avatarUrl || ticket.assignedTo.avatarUrl === '')) {
+      let assignedToAvatar = avatarCache.get(ticket.assignedTo.email);
+      if (assignedToAvatar === undefined) {
+        assignedToAvatar = await getUserAvatarFromFrappe(ticket.assignedTo.email, frappeToken);
+        avatarCache.set(ticket.assignedTo.email, assignedToAvatar || '');
+      }
       if (assignedToAvatar) {
         ticket.assignedTo.avatarUrl = assignedToAvatar;
       }
     }
   } catch (error) {
-    console.error('Error enriching ticket with avatars:', error.message);
+    console.debug('Note: Error enriching ticket with avatars:', error.message);
   }
   
   return ticket;
@@ -445,9 +479,10 @@ exports.getTickets = async (req, res) => {
 
     console.log("Found tickets:", tickets.length);
 
-    // Enrich tickets with avatars from Frappe
+    // Enrich tickets with avatars from Frappe using JWT token from request
+    const frappeToken = req.headers.authorization?.replace('Bearer ', '') || null;
     for (const ticket of tickets) {
-      await enrichTicketWithAvatars(ticket);
+      await enrichTicketWithAvatars(ticket, frappeToken);
     }
 
     res.status(200).json({ success: true, tickets });
@@ -479,9 +514,10 @@ exports.getMyTickets = async (req, res) => {
     
     console.log(`✅ [getMyTickets] Found ${tickets.length} tickets for user ${req.user.email}`);
     
-    // Enrich tickets with avatars from Frappe
+    // Enrich tickets with avatars from Frappe using JWT token from request
+    const frappeToken = req.headers.authorization?.replace('Bearer ', '') || null;
     for (const ticket of tickets) {
-      await enrichTicketWithAvatars(ticket);
+      await enrichTicketWithAvatars(ticket, frappeToken);
     }
     
     // Format tickets cho frontend
@@ -536,7 +572,9 @@ exports.getTicketById = async (req, res) => {
     }
 
     // Enrich ticket with avatars from Frappe if missing
-    await enrichTicketWithAvatars(ticket);
+    // Use JWT token from request headers or localStorage (already in req.headers.authorization)
+    const frappeToken = req.headers.authorization?.replace('Bearer ', '') || null;
+    await enrichTicketWithAvatars(ticket, frappeToken);
 
     return res.status(200).json({ 
       success: true, 
