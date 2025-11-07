@@ -10,6 +10,6 @@ router.post("/send-update", emailController.sendTicketStatusEmail);
 router.get("/fetch-emails", emailController.fetchEmailsAndCreateTickets);
 
 // Debug: liệt kê 10 email gần nhất trong inbox
-router.get("/peek-inbox", emailController.peekInbox);
+// router.get("/peek-inbox", emailController.peekInbox); // Disabled - function not implemented
 
 module.exports = router;
