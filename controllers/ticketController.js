@@ -58,6 +58,54 @@ function buildFrappeHeaders() {
   return headers;
 }
 
+// Helper function to get user avatar URL from Frappe
+async function getUserAvatarFromFrappe(userEmail) {
+  try {
+    const headers = buildFrappeHeaders();
+    const response = await axios.get(`${FRAPPE_API_URL}/api/resource/User/${userEmail}`, {
+      params: {
+        fields: JSON.stringify(['user_image', 'name', 'email'])
+      },
+      headers
+    });
+    
+    if (response.data?.data?.user_image) {
+      return response.data.data.user_image;
+    }
+    return '';
+  } catch (error) {
+    console.error(`Error getting avatar for user ${userEmail}:`, error.message);
+    return '';
+  }
+}
+
+// Helper function to enrich ticket with user avatars from Frappe
+async function enrichTicketWithAvatars(ticket) {
+  if (!ticket) return ticket;
+  
+  try {
+    // Fetch avatar for creator if missing
+    if (ticket.creator && !ticket.creator.avatarUrl) {
+      const creatorAvatar = await getUserAvatarFromFrappe(ticket.creator.email);
+      if (creatorAvatar) {
+        ticket.creator.avatarUrl = creatorAvatar;
+      }
+    }
+    
+    // Fetch avatar for assignedTo if missing
+    if (ticket.assignedTo && !ticket.assignedTo.avatarUrl) {
+      const assignedToAvatar = await getUserAvatarFromFrappe(ticket.assignedTo.email);
+      if (assignedToAvatar) {
+        ticket.assignedTo.avatarUrl = assignedToAvatar;
+      }
+    }
+  } catch (error) {
+    console.error('Error enriching ticket with avatars:', error.message);
+  }
+  
+  return ticket;
+}
+
 /**
  * Ticket Category Mapping (EN -> VI)
  */
@@ -397,6 +445,11 @@ exports.getTickets = async (req, res) => {
 
     console.log("Found tickets:", tickets.length);
 
+    // Enrich tickets with avatars from Frappe
+    for (const ticket of tickets) {
+      await enrichTicketWithAvatars(ticket);
+    }
+
     res.status(200).json({ success: true, tickets });
   } catch (error) {
     console.error("Error in getTickets:", error);
@@ -425,6 +478,11 @@ exports.getMyTickets = async (req, res) => {
       });
     
     console.log(`✅ [getMyTickets] Found ${tickets.length} tickets for user ${req.user.email}`);
+    
+    // Enrich tickets with avatars from Frappe
+    for (const ticket of tickets) {
+      await enrichTicketWithAvatars(ticket);
+    }
     
     // Format tickets cho frontend
     const formattedTickets = tickets.map(ticket => ({
@@ -476,6 +534,9 @@ exports.getTicketById = async (req, res) => {
     if (!ticket) {
       return res.status(404).json({ success: false, message: "Ticket không tồn tại" });
     }
+
+    // Enrich ticket with avatars from Frappe if missing
+    await enrichTicketWithAvatars(ticket);
 
     return res.status(200).json({ 
       success: true, 
