@@ -474,9 +474,11 @@ exports.getAvailableRoles = async (req, res) => {
         'Account': 'Tài khoản',
         'Camera System': 'Hệ thống Camera',
         'Network System': 'Hệ thống mạng',
-        'Bell System': 'Hệ thống chuông báo'
+        'Bell System': 'Hệ thống chuông báo',
+        'Software': 'Phần mềm',
+        'Email Ticket': 'Xử lý ticket từ email'
       };
-      
+
       return {
         value: role,
         label: labelMap[role] || role

@@ -18,15 +18,25 @@ const User = require("../models/Users");
  */
 async function getTechnicalUsers(token = null) {
   try {
-    // First try to get from SupportTeamMember collection (preferred)
-    const supportMembers = await SupportTeamMember.find({
+    // For email tickets, prioritize users with "Email Ticket" role
+    const emailTicketMembers = await SupportTeamMember.find({
       isActive: true,
-      roles: { $in: ['Overall', 'Software', 'Network', 'Camera System', 'Bell System'] }
+      roles: { $in: ['Email Ticket'] }
     }).populate('userId').lean();
 
-    if (supportMembers.length > 0) {
-      return supportMembers.map(member => ({
-        _id: member.userId._id,
+    if (emailTicketMembers.length > 0) {
+      // Sort by ticket count (least assigned first)
+      const sortedMembers = await Promise.all(
+        emailTicketMembers.map(async (member) => {
+          const ticketCount = await Ticket.countDocuments({ assignedTo: member._id });
+          return { ...member, ticketCount };
+        })
+      );
+
+      sortedMembers.sort((a, b) => a.ticketCount - b.ticketCount);
+
+      return sortedMembers.map(member => ({
+        _id: member._id,
         email: member.email,
         fullname: member.fullname,
         name: member.userId?.name || member.fullname,
@@ -34,7 +44,33 @@ async function getTechnicalUsers(token = null) {
       }));
     }
 
-    // Fallback: get users with technical roles from User collection
+    // Fallback: get from SupportTeamMember collection (other technical roles)
+    const supportMembers = await SupportTeamMember.find({
+      isActive: true,
+      roles: { $in: ['Overall', 'Software', 'Network', 'Camera System', 'Bell System'] }
+    }).populate('userId').lean();
+
+    if (supportMembers.length > 0) {
+      // Sort by ticket count (least assigned first)
+      const sortedMembers = await Promise.all(
+        supportMembers.map(async (member) => {
+          const ticketCount = await Ticket.countDocuments({ assignedTo: member._id });
+          return { ...member, ticketCount };
+        })
+      );
+
+      sortedMembers.sort((a, b) => a.ticketCount - b.ticketCount);
+
+      return sortedMembers.map(member => ({
+        _id: member._id,
+        email: member.email,
+        fullname: member.fullname,
+        name: member.userId?.name || member.fullname,
+        disabled: member.userId?.disabled || false
+      }));
+    }
+
+    // Final fallback: get users with technical roles from User collection
     const technicalUsers = await User.find({
       active: true,
       disabled: { $ne: true },
