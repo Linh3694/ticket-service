@@ -565,16 +565,47 @@ exports.webhookUserChanged = async (req, res) => {
         ? doc.roles.map(r => typeof r === 'string' ? r : r?.role).filter(Boolean)
         : [];
       
+      // Get existing user để preserve fields nếu webhook không gửi
+      const existingUser = await User.findOne({ email: doc.email });
+      
+      // Build update object - CHỈ update fields có giá trị
       const userData = {
         email: doc.email,
         fullname: doc.full_name || doc.name,
-        avatarUrl: doc.user_image || '',
-        department: doc.location || '',
         provider: 'frappe',
         disabled: false,
         active: true,
-        roles: frappe_roles
+        roles: frappe_roles,
+        updatedAt: new Date()
       };
+      
+      // Conditional updates - chỉ update nếu có giá trị mới
+      if (doc.user_image) {
+        userData.avatarUrl = doc.user_image;
+      } else if (!existingUser) {
+        userData.avatarUrl = '';  // Default cho new user
+      }
+      // Nếu không có user_image và có existingUser → giữ nguyên avatarUrl cũ
+      
+      if (doc.department || doc.location) {
+        userData.department = doc.department || doc.location;
+      } else if (!existingUser) {
+        userData.department = '';
+      }
+      
+      if (doc.job_title || doc.designation) {
+        userData.jobTitle = doc.job_title || doc.designation;
+      } else if (!existingUser) {
+        userData.jobTitle = 'User';
+      }
+      
+      if (doc.employee_code) {
+        userData.employeeCode = doc.employee_code;
+      }
+      
+      if (doc.microsoft_id) {
+        userData.microsoftId = doc.microsoft_id;
+      }
       
       const result = await User.findOneAndUpdate(
         { email: doc.email },
