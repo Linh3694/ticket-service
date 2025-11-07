@@ -1,13 +1,10 @@
 const jwt = require('jsonwebtoken');
 const mongoose = require('mongoose');
-const axios = require('axios');
 const User = require('../models/Users');
+const frappeService = require('../services/frappeService');
 
 // Get JWT secret từ env
 const JWT_SECRET = process.env.JWT_SECRET || 'default-secret-key';
-
-// Frappe API URL
-const FRAPPE_API_URL = process.env.FRAPPE_API_URL || 'https://admin.sis.wellspring.edu.vn';
 
 // 🔄 NEW: Verify JWT với Frappe API (CONSISTENT & RELIABLE)
 const authenticate = async (req, res, next) => {
@@ -21,34 +18,13 @@ const authenticate = async (req, res, next) => {
       });
     }
 
-    // 🔑 Verify JWT với Frappe API để đảm bảo consistency
     let userInfo;
     try {
       console.log('🔍 [Auth] Verifying token with Frappe API...');
 
-      const response = await axios.get(`${FRAPPE_API_URL}/api/method/frappe.auth.get_logged_user`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'X-Frappe-CSRF-Token': token,
-          'Content-Type': 'application/json'
-        },
-        timeout: 5000 // 5 second timeout
-      });
-
-      if (response.data?.message) {
-        // Get full user details
-        const userResponse = await axios.get(`${FRAPPE_API_URL}/api/resource/User/${response.data.message}`, {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'X-Frappe-CSRF-Token': token
-          }
-        });
-
-        userInfo = userResponse.data?.data;
-        console.log('✅ [Auth] Token verified with Frappe for user:', userInfo?.email);
-      } else {
-        throw new Error('Invalid token response from Frappe');
-      }
+      // Sử dụng frappeService để verify token
+      userInfo = await frappeService.verifyTokenAndGetUser(token);
+      console.log('✅ [Auth] Token verified with Frappe for user:', userInfo?.email);
 
     } catch (frappeError) {
       console.warn('⚠️ [Auth] Frappe API verification failed:', frappeError.message);
