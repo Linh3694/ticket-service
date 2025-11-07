@@ -88,8 +88,12 @@ async function getAllFrappeUsers(token) {
               'job_title', 'designation', 'employee_code', 'microsoft_id',
               'roles', 'docstatus', 'user_type'
             ]),
-            // Thử filter enabled users từ API (nếu API hỗ trợ)
-            filters: JSON.stringify([["User", "enabled", "=", 1]]),
+            // Filter enabled users (bao gồm cả System Users và Website Users)
+            // Loại bỏ Guest users
+            filters: JSON.stringify([
+              ["User", "enabled", "=", 1],
+              ["User", "user_type", "in", ["System User", "Website User"]]
+            ]),
             limit_start: start,
             limit_page_length: pageLength,
             order_by: 'name asc'
@@ -135,9 +139,14 @@ async function getAllFrappeUsers(token) {
         console.log(`✅ No more users found, stopping pagination`);
         hasMore = false;
       } else {
-        // Filter enabled users only (flexible logic)
-        // Priority: enabled field > disabled field > docstatus
+        // Filter enabled users (bao gồm cả System Users và Website Users)
+        // Priority: user_type > enabled field > disabled field > docstatus
         const enabledUsers = userList.filter(user => {
+          // Chỉ lấy System Users và Website Users (loại bỏ Guest và các loại khác)
+          if (user.user_type && user.user_type !== 'System User' && user.user_type !== 'Website User') {
+            return false;
+          }
+          
           // Check disabled field first (nếu disabled = true thì chắc chắn không enabled)
           if (user.disabled === true || user.disabled === 1 || user.disabled === "1") {
             return false;
@@ -454,24 +463,22 @@ exports.syncUsersManual = async (req, res) => {
 
           // Cập nhật SupportTeamMember nếu user này là member của support team
           try {
-            const supportTeamMember = await SupportTeamMember.findOne({ email: userEmail });
-            if (supportTeamMember) {
-              // Cập nhật avatarUrl, fullname, department từ userData
-              // Sử dụng !== undefined để đảm bảo update ngay cả khi giá trị là empty string
-              if (userData.avatarUrl !== undefined) {
-                supportTeamMember.avatarUrl = userData.avatarUrl;
-              }
-              if (userData.fullname !== undefined) {
-                supportTeamMember.fullname = userData.fullname;
-              }
-              if (userData.department !== undefined) {
-                supportTeamMember.department = userData.department;
-              }
-              await supportTeamMember.save();
-              
-              if (avatarDebugCount <= 5 && userData.avatarUrl) {
-                console.log(`🔄 [Sync] Updated SupportTeamMember avatar for ${userEmail}: "${userData.avatarUrl}"`);
-              }
+            // Force update avatarUrl, fullname, department bằng findOneAndUpdate với $set
+            // Điều này đảm bảo fields được update ngay cả khi giá trị không thay đổi
+            const updatedMember = await SupportTeamMember.findOneAndUpdate(
+              { email: userEmail },
+              { 
+                $set: {
+                  avatarUrl: userData.avatarUrl || '',
+                  fullname: userData.fullname,
+                  department: userData.department || ''
+                }
+              },
+              { new: true }
+            );
+            
+            if (updatedMember && avatarDebugCount <= 5 && userData.avatarUrl) {
+              console.log(`🔄 [Sync] Updated SupportTeamMember avatar for ${userEmail}: "${userData.avatarUrl}"`);
             }
           } catch (supportTeamErr) {
             // Log nhưng không fail sync nếu update SupportTeamMember lỗi
