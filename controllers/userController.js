@@ -81,7 +81,12 @@ async function getAllFrappeUsers(token) {
         `${FRAPPE_API_URL}/api/resource/User`,
         {
           params: {
-            fields: JSON.stringify(['name', 'email', 'full_name', 'user_image', 'enabled', 'disabled', 'location', 'roles', 'docstatus', 'user_type']),
+            fields: JSON.stringify([
+              'name', 'email', 'full_name', 'first_name', 'middle_name', 'last_name',
+              'user_image', 'enabled', 'disabled', 'location', 'department',
+              'job_title', 'designation', 'employee_code', 'microsoft_id',
+              'roles', 'docstatus', 'user_type'
+            ]),
             limit_start: start,
             limit_page_length: pageLength,
             order_by: 'name asc'
@@ -151,19 +156,37 @@ async function getAllFrappeUsers(token) {
     // Roles sẽ được update sau qua webhook hoặc khi user login
     // Nếu list API không có roles, sẽ là empty array và sẽ được update sau
     const detailedUsers = allUsers.map(user => {
-      // Đảm bảo có đủ fields cần thiết
+      // Normalize roles từ list API (có thể là string array hoặc object array)
+      const normalizedRoles = Array.isArray(user.roles)
+        ? user.roles.map((r) => (typeof r === 'string' ? r : r?.role)).filter(Boolean)
+        : [];
+
+      // Đảm bảo có đủ fields cần thiết cho formatFrappeUser
       return {
         name: user.name,
         email: user.email,
         full_name: user.full_name || user.name,
+        first_name: user.first_name,
+        middle_name: user.middle_name,
+        last_name: user.last_name,
         user_image: user.user_image || '',
         enabled: user.enabled,
+        disabled: user.disabled,
         location: user.location || '',
-        roles: user.roles || [] // Có thể là empty nếu list API không trả về
+        department: user.department, // Include department nếu có
+        job_title: user.job_title,
+        designation: user.designation,
+        employee_code: user.employee_code,
+        employeeCode: user.employeeCode,
+        microsoft_id: user.microsoft_id,
+        microsoftId: user.microsoftId,
+        docstatus: user.docstatus, // Quan trọng: cần để formatFrappeUser xác định enabled status
+        roles: normalizedRoles, // Normalized roles
+        roles_list: user.roles_list || normalizedRoles // Fallback
       };
     });
 
-    console.log(`✅ Using ${detailedUsers.length} enabled users from list API (roles will be updated via webhook)`);
+    console.log(`✅ Using ${detailedUsers.length} enabled users from list API (roles normalized, will be updated via webhook if needed)`);
     return detailedUsers;
   } catch (error) {
     console.error('❌ Error fetching Frappe users:', error.message);
@@ -177,20 +200,36 @@ async function getAllFrappeUsers(token) {
 
 // Format Frappe user → Users model
 function formatFrappeUser(frappeUser) {
-  const frappe_roles = frappeUser.roles?.map(r => r.role) || [];
+  // Normalize roles: hỗ trợ cả string array và object array
+  const roles = Array.isArray(frappeUser.roles)
+    ? frappeUser.roles.map((r) => (typeof r === 'string' ? r : r?.role)).filter(Boolean)
+    : Array.isArray(frappeUser.roles_list)
+    ? frappeUser.roles_list
+    : [];
+
+  // Xác định enabled status: ưu tiên docstatus, fallback về enabled/disabled fields
   // In Frappe, users with docstatus = 0 are considered enabled (active)
-  const isEnabled = frappeUser.docstatus === 0;
+  const isEnabled = frappeUser.docstatus === 0 || 
+    (frappeUser.docstatus === undefined && frappeUser.enabled !== false && frappeUser.disabled !== true);
+
+  // Normalize fullname với nhiều fallback options
+  const fullName = frappeUser.full_name || frappeUser.fullname || frappeUser.fullName ||
+    [frappeUser.first_name, frappeUser.middle_name, frappeUser.last_name].filter(Boolean).join(' ') ||
+    frappeUser.name;
 
   return {
     email: frappeUser.email,
-    fullname: frappeUser.full_name || frappeUser.name,
-    avatarUrl: frappeUser.user_image || '', // Giữ nguyên relative path /files/...
-    department: frappeUser.location || '',
+    fullname: fullName,
+    avatarUrl: frappeUser.user_image || frappeUser.userImage || frappeUser.avatar || frappeUser.avatar_url || '',
+    department: frappeUser.department || frappeUser.location || 'Unknown',
+    jobTitle: frappeUser.job_title || frappeUser.designation || 'User',
     provider: 'frappe',
     disabled: !isEnabled,
     active: isEnabled,
-    roles: frappe_roles,  // 🔴 Frappe system roles
-    microsoftId: frappeUser.name  // Store Frappe name as reference
+    roles: roles,  // Frappe system roles (normalized)
+    role: roles.length > 0 ? roles[0].toLowerCase() : 'user', // Legacy single role
+    microsoftId: frappeUser.microsoft_id || frappeUser.microsoftId || frappeUser.name, // Store Frappe name as reference
+    employeeCode: frappeUser.employee_code || frappeUser.employeeCode || undefined
   };
 }
 
@@ -287,12 +326,26 @@ exports.syncUsersManual = async (req, res) => {
 
     let synced = 0;
     let failed = 0;
+    const failedUsers = []; // Track failed users for debugging
     const batchSize = 10; // Process 10 users at a time
     const batches = [];
 
+    // Filter out users without email before processing
+    const validUsers = frappeUsers.filter(user => {
+      if (!user.email) {
+        console.warn(`⚠️  [Manual Sync] Skipping user without email: ${user.name || 'Unknown'}`);
+        failed++;
+        failedUsers.push({ identifier: user.name || 'Unknown', error: 'Missing email' });
+        return false;
+      }
+      return true;
+    });
+
+    console.log(`✅ [Manual Sync] ${validUsers.length} valid users (${frappeUsers.length - validUsers.length} skipped due to missing email)`);
+
     // Chia thành các batch
-    for (let i = 0; i < frappeUsers.length; i += batchSize) {
-      batches.push(frappeUsers.slice(i, i + batchSize));
+    for (let i = 0; i < validUsers.length; i += batchSize) {
+      batches.push(validUsers.slice(i, i + batchSize));
     }
 
     console.log(`🔄 [Manual Sync] Processing ${batches.length} batches of ${batchSize} users each...`);
@@ -307,34 +360,57 @@ exports.syncUsersManual = async (req, res) => {
       // Process batch parallel với Promise.allSettled
       const batchPromises = batch.map(async (frappeUser) => {
         try {
+          // Validate email one more time
+          if (!frappeUser.email) {
+            throw new Error('Email is required');
+          }
+
           const userData = formatFrappeUser(frappeUser);
+
+          // Validate formatted user data
+          if (!userData.email || !userData.fullname) {
+            throw new Error(`Invalid user data: missing email or fullname`);
+          }
 
           // Log để debug avatar update (chỉ log nếu có avatar)
           if (frappeUser.user_image) {
             console.log(`🖼️  [Sync] Updating avatar for ${frappeUser.email}: ${userData.avatarUrl}`);
           }
 
-          await User.findOneAndUpdate(
+          const result = await User.findOneAndUpdate(
             { email: frappeUser.email },
             userData,
-            { upsert: true, new: true }
+            { upsert: true, new: true, setDefaultsOnInsert: true }
           );
 
-          return { success: true, email: frappeUser.email };
+          return { success: true, email: frappeUser.email, roles: result.roles || [] };
         } catch (err) {
-          console.error(`❌ Failed: ${frappeUser.email}`, err.message);
-          return { success: false, email: frappeUser.email, error: err.message };
+          console.error(`❌ [Manual Sync] Failed to sync ${frappeUser.email || frappeUser.name}: ${err.message}`);
+          return { success: false, email: frappeUser.email || frappeUser.name, error: err.message };
         }
       });
 
       const batchResults = await Promise.allSettled(batchPromises);
 
-      // Count results
+      // Count results và collect failed users
       batchResults.forEach(result => {
-        if (result.status === 'fulfilled' && result.value.success) {
-          synced++;
+        if (result.status === 'fulfilled') {
+          if (result.value.success) {
+            synced++;
+          } else {
+            failed++;
+            failedUsers.push({
+              email: result.value.email,
+              error: result.value.error
+            });
+          }
         } else {
+          // Promise rejected
           failed++;
+          failedUsers.push({
+            email: 'Unknown',
+            error: result.reason?.message || 'Unknown error'
+          });
         }
       });
 
@@ -344,26 +420,46 @@ exports.syncUsersManual = async (req, res) => {
       // Progress logging mỗi 50 users
       const totalProcessed = synced + failed;
       if (totalProcessed % 50 === 0 || batchIndex === batches.length - 1) {
-        const progress = ((totalProcessed / frappeUsers.length) * 100).toFixed(1);
+        const progress = ((totalProcessed / validUsers.length) * 100).toFixed(1);
         const elapsed = ((Date.now() - startTime) / 1000).toFixed(2);
-        console.log(`📊 [Manual Sync] Progress: ${totalProcessed}/${frappeUsers.length} users (${progress}%) in ${elapsed}s`);
+        console.log(`📊 [Manual Sync] Progress: ${totalProcessed}/${validUsers.length} users (${progress}%) in ${elapsed}s`);
       }
     }
 
     const totalDuration = ((Date.now() - startTime) / 1000).toFixed(2);
     console.log(`✅ [Manual Sync] Complete: ${synced} synced, ${failed} failed in ${totalDuration}s`);
 
-    res.status(200).json({
+    const response = {
       success: true,
       message: `Manual sync completed for ${frappeUsers.length} enabled users`,
-      stats: { synced, failed, total: frappeUsers.length },
+      stats: { 
+        synced, 
+        failed, 
+        total: frappeUsers.length,
+        valid_users: validUsers.length,
+        skipped: frappeUsers.length - validUsers.length
+      },
       duration_seconds: parseFloat(totalDuration)
-    });
+    };
+
+    // Include failed users in response if any (for debugging)
+    if (failedUsers.length > 0 && failedUsers.length <= 20) {
+      response.failed_users = failedUsers.slice(0, 20); // Limit to first 20 failed users
+    } else if (failedUsers.length > 20) {
+      response.failed_users_count = failedUsers.length;
+      response.failed_users_sample = failedUsers.slice(0, 10); // Show sample of 10
+    }
+
+    res.status(200).json(response);
   } catch (error) {
     console.error('❌ [Manual Sync] Error:', error.message);
+    if (error.stack) {
+      console.error('Stack trace:', error.stack);
+    }
     res.status(500).json({
       success: false,
-      message: error.message
+      message: error.message,
+      error: process.env.NODE_ENV === 'development' ? error.stack : undefined
     });
   }
 };
