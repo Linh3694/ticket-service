@@ -70,7 +70,7 @@ async function getAllFrappeUsers(token) {
     // Paginate để lấy TẤT CẢ enabled users
     const allUsers = [];
     let start = 0;
-    const pageLength = 100; // Fetch 100 users per page for better performance
+    const pageLength = 20; // Frappe default/max limit seems to be 20
     let hasMore = true;
 
     while (hasMore) {
@@ -84,12 +84,7 @@ async function getAllFrappeUsers(token) {
               'job_title', 'designation', 'employee_code', 'microsoft_id',
               'roles', 'docstatus', 'user_type'
             ]),
-            // Filter enabled users (bao gồm cả System Users và Website Users)
-            // Loại bỏ Guest users
-            filters: JSON.stringify([
-              ["User", "enabled", "=", 1],
-              ["User", "user_type", "in", ["System User", "Website User"]]
-            ]),
+            // Không filter ở API level - sẽ filter ở code để lấy hết users
             limit_start: start,
             limit_page_length: pageLength,
             order_by: 'name asc'
