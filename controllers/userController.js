@@ -65,15 +65,15 @@ async function getFrappeUserDetail(userEmail, token) {
 // Fetch enabled users từ Frappe (chỉ lấy users đang active)
 async function getAllFrappeUsers(token) {
   try {
-    console.log('🔍 [Sync] Fetching enabled users from Frappe...');
+    console.log('🔍 [Sync] Fetching all enabled users from Frappe...');
 
-    // Paginate để lấy TẤT CẢ enabled users
+    // Fetch với limit cao (2500 - theo site config)
     const allUsers = [];
-    const seenEmails = new Set(); // Track seen emails to detect duplicates
+    const seenEmails = new Set();
     let start = 0;
-    const pageLength = 2500; // Load 500 users per page (Frappe supports this)
+    const pageLength = 2500;
     let hasMore = true;
-    const maxPages = 20; // Safety limit: max 20 pages (10000 users)
+    const maxPages = 10; // Max 10 pages (25000 users)
     let pageCount = 0;
 
     while (hasMore && pageCount < maxPages) {
