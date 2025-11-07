@@ -287,9 +287,11 @@ exports.createTicket = async (req, res) => {
     console.log(`   newTicket.assignedTo: ${newTicket.assignedTo}`);
 
     // 4️⃣ Log history
+    const creatorName = reverseName(req.user.fullname || req.user.email);
+    console.log(`📝 [createTicket] Creator name: "${creatorName}"`);
     await logTicketHistory(
       newTicket._id,
-      `Ticket created by <strong>${reverseName(req.user.fullname || req.user.email)}</strong>`,
+      `Ticket created by <strong>${creatorName}</strong>`,
       userId
     );
 
@@ -297,10 +299,12 @@ exports.createTicket = async (req, res) => {
       // Get assigned user info for history log
       const SupportTeamMember = require('../models/SupportTeamMember');
       const assignedMember = await SupportTeamMember.findById(assignedToId).select('fullname');
+      const assignedName = reverseName(assignedMember?.fullname || 'Unknown');
+      console.log(`📝 [createTicket] Assigned name: "${assignedName}"`);
 
       await logTicketHistory(
         newTicket._id,
-        `Auto-assigned to <strong>${reverseName(assignedMember?.fullname || 'Unknown')}</strong>`,
+        `Auto-assigned to <strong>${assignedName}</strong>`,
         userId
       );
     }
@@ -1484,16 +1488,22 @@ exports.assignTicketToMe = async (req, res) => {
       if (!fullname) return fullname;
       const parts = fullname.trim().split(' ');
       if (parts.length <= 1) return fullname;
-      // Đảo thứ tự: từ "Nguyễn Văn A" thành "Văn A Nguyễn"
-      const firstName = parts[0]; // Nguyễn
-      const rest = parts.slice(1); // [Văn, A]
-      return rest.join(' ') + ' ' + firstName; // "Văn A Nguyễn"
+      // Đảo thứ tự: từ "Linh Nguyễn Hải" thành "Nguyễn Hải Linh"
+      const firstName = parts[0]; // Linh
+      const rest = parts.slice(1); // [Nguyễn, Hải]
+      const result = rest.join(' ') + ' ' + firstName; // "Nguyễn Hải Linh"
+      console.log(`🔄 [reverseName] "${fullname}" -> "${result}"`);
+      return result;
     };
 
     // Log history
+    const assigneeName = reverseName(req.user.fullname);
+    const previousName = reverseName(previousAssignedTo);
+    console.log(`📝 [assignTicketToMe] Assignee: "${assigneeName}", Previous: "${previousName}"`);
+
     ticket.history.push({
       timestamp: new Date(),
-      action: `<strong>${reverseName(req.user.fullname)}</strong> đã nhận ticket từ <strong>${reverseName(previousAssignedTo)}</strong>. Trạng thái chuyển sang <strong>Đang xử lý</strong>`,
+      action: `<strong>${assigneeName}</strong> đã nhận ticket từ <strong>${previousName}</strong>. Trạng thái chuyển sang <strong>Đang xử lý</strong>`,
       user: userId
     });
 
