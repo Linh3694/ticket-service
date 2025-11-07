@@ -391,6 +391,12 @@ exports.syncUsersManual = async (req, res) => {
     let synced = 0;
     let failed = 0;
     const failedUsers = []; // Track failed users for debugging
+    const syncedUsers = []; // Track synced users
+    const userTypeStats = {
+      'System User': 0,
+      'Website User': 0,
+      'Other': 0
+    };
     const batchSize = 10; // Process 10 users at a time
     const batches = [];
     let avatarDebugCount = 0; // Counter để chỉ log một vài avatars đầu tiên
@@ -485,7 +491,13 @@ exports.syncUsersManual = async (req, res) => {
             console.warn(`⚠️  [Sync] Failed to update SupportTeamMember for ${userEmail}: ${supportTeamErr.message}`);
           }
 
-          return { success: true, email: userEmail, roles: result.roles || [] };
+          return { 
+            success: true, 
+            email: userEmail, 
+            roles: result.roles || [],
+            userType: frappeUser.user_type || 'Unknown',
+            fullname: userData.fullname
+          };
         } catch (err) {
           console.error(`❌ [Manual Sync] Failed to sync ${frappeUser.email || frappeUser.name || 'Unknown'}: ${err.message}`);
           return { success: false, email: frappeUser.email || frappeUser.name || 'Unknown', error: err.message };
@@ -499,6 +511,20 @@ exports.syncUsersManual = async (req, res) => {
         if (result.status === 'fulfilled') {
           if (result.value.success) {
             synced++;
+            // Track synced user
+            syncedUsers.push({
+              email: result.value.email,
+              fullname: result.value.fullname,
+              userType: result.value.userType,
+              roles: result.value.roles || []
+            });
+            // Count by user type
+            const userType = result.value.userType || 'Other';
+            if (userTypeStats.hasOwnProperty(userType)) {
+              userTypeStats[userType]++;
+            } else {
+              userTypeStats['Other']++;
+            }
           } else {
             failed++;
             failedUsers.push({
@@ -530,6 +556,14 @@ exports.syncUsersManual = async (req, res) => {
 
     const totalDuration = ((Date.now() - startTime) / 1000).toFixed(2);
     console.log(`✅ [Manual Sync] Complete: ${synced} synced, ${failed} failed in ${totalDuration}s`);
+    console.log(`📊 [Manual Sync] User type breakdown:`);
+    console.log(`   - System Users: ${userTypeStats['System User']}`);
+    console.log(`   - Website Users: ${userTypeStats['Website User']}`);
+    console.log(`   - Other: ${userTypeStats['Other']}`);
+
+    // Check query parameter để xem có muốn trả về full list không
+    const includeList = req.query.include_list === 'true' || req.query.include_list === '1';
+    const listLimit = parseInt(req.query.list_limit) || 100; // Default limit 100 users
 
     const response = {
       success: true,
@@ -539,10 +573,27 @@ exports.syncUsersManual = async (req, res) => {
         failed, 
         total: frappeUsers.length,
         valid_users: validUsers.length,
-        skipped: frappeUsers.length - validUsers.length
+        skipped: frappeUsers.length - validUsers.length,
+        user_type_breakdown: userTypeStats
       },
       duration_seconds: parseFloat(totalDuration)
     };
+
+    // Include synced users list nếu được yêu cầu
+    if (includeList) {
+      if (syncedUsers.length <= listLimit) {
+        response.synced_users = syncedUsers;
+      } else {
+        response.synced_users = syncedUsers.slice(0, listLimit);
+        response.synced_users_total = syncedUsers.length;
+        response.synced_users_note = `Showing first ${listLimit} of ${syncedUsers.length} synced users. Use ?include_list=true&list_limit=<number> to get more.`;
+      }
+    } else {
+      // Mặc định chỉ trả về sample 10 users đầu tiên
+      response.synced_users_sample = syncedUsers.slice(0, 10);
+      response.synced_users_total = syncedUsers.length;
+      response.synced_users_note = `Showing sample of 10 users. Add ?include_list=true to get full list, or ?include_list=true&list_limit=<number> for custom limit.`;
+    }
 
     // Include failed users in response if any (for debugging)
     if (failedUsers.length > 0 && failedUsers.length <= 20) {
