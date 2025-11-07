@@ -9,6 +9,8 @@ function normalizeVietnameseName(fullname) {
   const parts = fullname.trim().split(' ').filter(word => word.length > 0);
   if (parts.length <= 1) return fullname;
 
+  console.log(`🔄 [normalizeVietnameseName] Input: "${fullname}"`);
+
   // Danh sách họ Việt Nam phổ biến
   const vietnameseSurnames = ['Nguyễn', 'Trần', 'Lê', 'Phạm', 'Hoàng', 'Huỳnh', 'Phan', 'Vũ', 'Võ', 'Đặng', 'Bùi', 'Đỗ', 'Hồ', 'Ngô', 'Dương', 'Lý'];
 
@@ -20,15 +22,20 @@ function normalizeVietnameseName(fullname) {
 
       // Với 3 từ: Họ + Tên cuối + Tên đầu (để có format "Nguyễn Hải Linh")
       if (rest.length === 2) {
-        return `${surname} ${rest[1]} ${rest[0]}`;
+        const result = `${surname} ${rest[1]} ${rest[0]}`;
+        console.log(`🔄 [normalizeVietnameseName] Output: "${result}"`);
+        return result;
       }
 
       // Với nhiều hơn 3 từ hoặc ít hơn, giữ thứ tự gốc
-      return `${surname} ${rest.join(' ')}`;
+      const result = `${surname} ${rest.join(' ')}`;
+      console.log(`🔄 [normalizeVietnameseName] Output: "${result}"`);
+      return result;
     }
   }
 
   // Nếu không tìm thấy họ trong danh sách, giữ nguyên format gốc
+  console.log(`🔄 [normalizeVietnameseName] No surname found, returning: "${fullname}"`);
   return fullname;
 }
 
