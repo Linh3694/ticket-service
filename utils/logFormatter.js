@@ -94,22 +94,6 @@ const SUBTASK_LOGS = {
     `<strong>${normalizeVietnameseName(userName)}</strong> đã xoá subtask <strong>"${title}"</strong>`,
 };
 
-/**
- * FEEDBACK LOGS
- */
-const FEEDBACK_LOGS = {
-  // Initial feedback
-  FEEDBACK_INITIAL: (userName, rating, comment = null) => {
-    if (comment) {
-      return `<strong>${normalizeVietnameseName(userName)}</strong> đã đánh giá lần đầu (<strong>${rating}</strong> sao, nhận xét: "<strong>${comment}</strong>")`;
-    }
-    return `<strong>${normalizeVietnameseName(userName)}</strong> đã đánh giá lần đầu (<strong>${rating}</strong> sao)`;
-  },
-
-  // Update feedback
-  FEEDBACK_UPDATED: (userName, oldRating, newRating, comment) =>
-    `<strong>${normalizeVietnameseName(userName)}</strong> đã cập nhật đánh giá từ <strong>${oldRating}</strong> lên <strong>${newRating}</strong> sao, nhận xét: "<strong>${comment}</strong>"`,
-};
 
 /**
  * OTHER LOGS
@@ -131,7 +115,6 @@ const OTHER_LOGS = {
 module.exports = {
   TICKET_LOGS,
   SUBTASK_LOGS,
-  FEEDBACK_LOGS,
   OTHER_LOGS,
   normalizeVietnameseName,
   translateStatus

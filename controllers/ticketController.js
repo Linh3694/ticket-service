@@ -1,7 +1,7 @@
 const Ticket = require("../models/Ticket");
 const SupportTeam = require("../models/SupportTeam");
 const notificationService = require('../services/notificationService');
-const { TICKET_LOGS, SUBTASK_LOGS, FEEDBACK_LOGS, OTHER_LOGS, normalizeVietnameseName, translateStatus } = require('../utils/logFormatter');
+const { TICKET_LOGS, SUBTASK_LOGS, OTHER_LOGS, normalizeVietnameseName, translateStatus } = require('../utils/logFormatter');
 const mongoose = require("mongoose");
 const axios = require('axios');
 const fs = require('fs');
@@ -714,12 +714,6 @@ exports.addFeedback = async (req, res) => {
         badges: badges || [],
       };
 
-      ticket.history.push({
-        timestamp: new Date(),
-        action: FEEDBACK_LOGS.FEEDBACK_INITIAL(normalizeVietnameseName(req.user.fullname), rating, comment),
-        user: req.user._id,
-      });
-
     } else {
       if (!rating) {
         return res.status(400).json({
@@ -739,12 +733,6 @@ exports.addFeedback = async (req, res) => {
       ticket.feedback.rating = rating;
       ticket.feedback.comment = comment;
       ticket.feedback.badges = badges || [];
-
-      ticket.history.push({
-        timestamp: new Date(),
-        action: FEEDBACK_LOGS.FEEDBACK_UPDATED(normalizeVietnameseName(req.user.fullname), oldRating, rating, comment),
-        user: req.user._id,
-      });
     }
 
     await ticket.save();
@@ -1689,12 +1677,6 @@ exports.acceptFeedback = async (req, res) => {
     ticket.closedAt = new Date();
     ticket.updatedAt = new Date();
 
-    // Log history
-    ticket.history.push({
-      timestamp: new Date(),
-      action: FEEDBACK_LOGS.FEEDBACK_ACCEPTED(normalizeVietnameseName(req.user.fullname), rating),
-      user: userId
-    });
 
     await ticket.save();
     console.log(`✅ [acceptFeedback] Feedback saved and ticket closed: ${ticketId}`);
