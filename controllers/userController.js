@@ -92,7 +92,9 @@ async function getAllFrappeUsers(token) {
       try {
         const frappe_user = await getFrappeUserDetail(userItem.name, token);
         
-        if (frappe_user && frappe_user.enabled === 1) {
+        // Frappe có thể gửi enabled là string "1" hoặc number 1, cần normalize
+        const isEnabled = frappe_user?.enabled === 1 || frappe_user?.enabled === "1" || frappe_user?.enabled === true;
+        if (frappe_user && isEnabled) {
           detailedUsers.push(frappe_user);
         }
       } catch (err) {
@@ -117,7 +119,7 @@ function formatFrappeUser(frappeUser) {
   return {
     email: frappeUser.email,
     fullname: frappeUser.full_name || frappeUser.name,
-    avatarUrl: frappeUser.user_image || '',
+    avatarUrl: frappeUser.user_image || '', // Giữ nguyên relative path /files/...
     department: frappeUser.location || '',
     provider: 'frappe',
     disabled: !isEnabled,
@@ -214,6 +216,11 @@ exports.syncUsersManual = async (req, res) => {
       try {
         const userData = formatFrappeUser(frappeUser);
         
+        // Log để debug avatar update
+        if (frappeUser.user_image) {
+          console.log(`🖼️  [Sync] Updating avatar for ${frappeUser.email}: ${userData.avatarUrl}`);
+        }
+        
         await User.findOneAndUpdate(
           { email: frappeUser.email },
           userData,
@@ -221,7 +228,7 @@ exports.syncUsersManual = async (req, res) => {
         );
         synced++;
       } catch (err) {
-        console.error(`❌ Failed: ${frappeUser.email}`);
+        console.error(`❌ Failed: ${frappeUser.email}`, err.message);
         failed++;
       }
     }

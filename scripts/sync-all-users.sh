@@ -13,7 +13,7 @@ NC='\033[0m' # No Color
 
 # Configuration
 TICKET_SERVICE_URL="${TICKET_SERVICE_URL:-https://admin.sis.wellspring.edu.vn}"
-SYNC_ENDPOINT="/api/ticket/user/sync/all"
+SYNC_ENDPOINT="/api/ticket/user/sync/manual"
 FULL_URL="${TICKET_SERVICE_URL}${SYNC_ENDPOINT}"
 
 # Get token from argument

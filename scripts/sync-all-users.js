@@ -26,7 +26,7 @@ if (!token) {
 
 const syncAllUsers = async () => {
   try {
-    const url = `${baseURL}/api/ticket/user/sync/all`;
+    const url = `${baseURL}/api/ticket/user/sync/manual`;
     
     console.log('🔄 Starting User Sync...');
     console.log(`URL: ${url}`);
