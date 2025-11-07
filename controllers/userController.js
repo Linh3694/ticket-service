@@ -67,13 +67,13 @@ async function getAllFrappeUsers(token) {
   try {
     console.log('🔍 [Sync] Fetching all Frappe users...');
     
-    // Tối ưu: Fetch với fields cần thiết và filter enabled ngay trong API call
+    // Tối ưu: Fetch với fields cần thiết - LẤY TẤT CẢ USERS (không filter enabled)
     const listResponse = await axios.get(
       `${FRAPPE_API_URL}/api/resource/User`,
       {
         params: {
           fields: JSON.stringify(['name', 'email', 'full_name', 'user_image', 'enabled', 'location', 'roles']),
-          filters: JSON.stringify([['enabled', '=', 1]]), // Chỉ lấy enabled users
+          // Không filter enabled - lấy tất cả users
           limit_page_length: 5000,
           order_by: 'name asc'
         },
@@ -85,45 +85,25 @@ async function getAllFrappeUsers(token) {
     );
     
     let userList = listResponse.data.data || [];
-    console.log(`✅ Found ${userList.length} enabled users in Frappe`);
+    console.log(`✅ Found ${userList.length} users in Frappe (all users, including disabled)`);
     
-    // Frappe list API có thể không trả về roles (child table), cần fetch chi tiết
-    // Tối ưu: Fetch parallel với batch để nhanh hơn
-    const detailedUsers = [];
-    const BATCH_SIZE = 10; // Fetch 10 users cùng lúc
+    // Tối ưu: Sử dụng data từ list API luôn (đã có đủ fields cần thiết)
+    // Roles sẽ được update sau qua webhook hoặc khi user login
+    // Nếu list API không có roles, sẽ là empty array và sẽ được update sau
+    const detailedUsers = userList.map(user => {
+      // Đảm bảo có đủ fields cần thiết
+      return {
+        name: user.name,
+        email: user.email,
+        full_name: user.full_name || user.name,
+        user_image: user.user_image || '',
+        enabled: user.enabled,
+        location: user.location || '',
+        roles: user.roles || [] // Có thể là empty nếu list API không trả về
+      };
+    });
     
-    console.log(`🔍 Fetching details for ${userList.length} users (need roles)...`);
-    
-    // Chia thành batches và fetch parallel
-    for (let i = 0; i < userList.length; i += BATCH_SIZE) {
-      const batch = userList.slice(i, i + BATCH_SIZE);
-      console.log(`📦 Processing batch ${Math.floor(i / BATCH_SIZE) + 1}/${Math.ceil(userList.length / BATCH_SIZE)} (${batch.length} users)...`);
-      
-      // Fetch parallel cho batch này
-      const batchPromises = batch.map(async (userItem) => {
-        try {
-          const frappe_user = await getFrappeUserDetail(userItem.name, token);
-          
-          // Frappe có thể gửi enabled là string "1" hoặc number 1, cần normalize
-          const isEnabled = frappe_user?.enabled === 1 || frappe_user?.enabled === "1" || frappe_user?.enabled === true;
-          if (frappe_user && isEnabled) {
-            return frappe_user;
-          }
-          return null;
-        } catch (err) {
-          console.warn(`⚠️  Failed to fetch user ${userItem.name}: ${err.message}`);
-          return null;
-        }
-      });
-      
-      const batchResults = await Promise.all(batchPromises);
-      const validUsers = batchResults.filter(u => u !== null);
-      detailedUsers.push(...validUsers);
-      
-      console.log(`✅ Batch ${Math.floor(i / BATCH_SIZE) + 1} completed: ${validUsers.length}/${batch.length} users`);
-    }
-    
-    console.log(`✅ Fetched ${detailedUsers.length} enabled users`);
+    console.log(`✅ Using ${detailedUsers.length} users from list API (roles will be updated via webhook)`);
     return detailedUsers;
   } catch (error) {
     console.error('❌ Error fetching Frappe users:', error.message);
