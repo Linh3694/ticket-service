@@ -75,11 +75,13 @@ const authenticate = async (req, res, next) => {
       ? userInfo.roles.map(r => typeof r === 'string' ? r : r?.role).filter(Boolean)
       : [];
 
+    // Get existing user để preserve fields
+    const existingUser = await User.findOne({ email: userInfo.email });
+
+    // Build update - CHỈ update fields có giá trị (tránh ghi đè với empty)
     const userData = {
       email: userInfo.email,
       fullname: userInfo.full_name || userInfo.fullname || userInfo.name,
-      avatarUrl: userInfo.user_image || userInfo.avatar || '',
-      department: userInfo.department || '',
       provider: 'frappe',
       disabled: userInfo.enabled !== 1,
       active: userInfo.enabled === 1,
@@ -87,6 +89,34 @@ const authenticate = async (req, res, next) => {
       role: frappeRoles.length > 0 ? frappeRoles[0].toLowerCase() : 'user',
       updatedAt: new Date()
     };
+
+    // Conditional updates - chỉ update nếu có giá trị mới
+    if (userInfo.user_image || userInfo.avatar) {
+      userData.avatarUrl = userInfo.user_image || userInfo.avatar;
+    } else if (!existingUser) {
+      userData.avatarUrl = '';  // Default for new users
+    }
+    // Nếu không có avatar mới và có existingUser → giữ nguyên
+
+    if (userInfo.department) {
+      userData.department = userInfo.department;
+    } else if (!existingUser) {
+      userData.department = '';
+    }
+
+    if (userInfo.job_title || userInfo.designation) {
+      userData.jobTitle = userInfo.job_title || userInfo.designation;
+    } else if (!existingUser) {
+      userData.jobTitle = 'User';
+    }
+
+    if (userInfo.employee_code) {
+      userData.employeeCode = userInfo.employee_code;
+    }
+
+    if (userInfo.microsoft_id) {
+      userData.microsoftId = userInfo.microsoft_id;
+    }
 
     let localUser = await User.findOneAndUpdate(
       { email: userInfo.email },

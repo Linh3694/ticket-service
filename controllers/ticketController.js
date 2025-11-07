@@ -286,20 +286,37 @@ async function getUsersByFrappeRole(roleName = 'IT Helpdesk', bearerToken = null
         const fu = userResp.data?.data;
         if (!fu) continue;
 
+        // Get existing user để preserve fields
+        const existingUser = await User.findOne({ email: fu.email });
+
+        // Build update - conditional để không ghi đè empty
+        const updateData = {
+          email: fu.email,
+          fullname: fu.full_name || fu.name,
+          role: 'technical',
+          provider: 'frappe',
+          active: fu.enabled === 1,
+          disabled: fu.enabled !== 1,
+          // đảm bảo roles chứa đúng Frappe Role
+          $addToSet: { roles: roleName },
+        };
+
+        // Chỉ update nếu có giá trị
+        if (fu.user_image) {
+          updateData.avatarUrl = fu.user_image;
+        } else if (!existingUser) {
+          updateData.avatarUrl = '';
+        }
+
+        if (fu.department) {
+          updateData.department = fu.department;
+        } else if (!existingUser) {
+          updateData.department = '';
+        }
+
         const local = await User.findOneAndUpdate(
           { email: fu.email },
-          {
-            email: fu.email,
-            fullname: fu.full_name || fu.name,
-            avatarUrl: fu.user_image || '',
-            department: fu.department || '',
-            role: 'technical',
-            provider: 'frappe',
-            active: fu.enabled === 1,
-            disabled: fu.enabled !== 1,
-            // đảm bảo roles chứa đúng Frappe Role
-            $addToSet: { roles: roleName },
-          },
+          updateData,
           { new: true, upsert: true }
         );
         createdLocals.push(local);
