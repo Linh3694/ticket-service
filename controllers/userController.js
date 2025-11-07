@@ -111,6 +111,8 @@ async function getAllFrappeUsers(token) {
 // Format Frappe user → Users model
 function formatFrappeUser(frappeUser) {
   const frappe_roles = frappeUser.roles?.map(r => r.role) || [];
+  // Frappe có thể gửi enabled là string "1" hoặc number 1, cần normalize
+  const isEnabled = frappeUser.enabled === 1 || frappeUser.enabled === "1" || frappeUser.enabled === true;
   
   return {
     email: frappeUser.email,
@@ -118,8 +120,8 @@ function formatFrappeUser(frappeUser) {
     avatarUrl: frappeUser.user_image || '',
     department: frappeUser.location || '',
     provider: 'frappe',
-    disabled: frappeUser.enabled !== 1,
-    active: frappeUser.enabled === 1,
+    disabled: !isEnabled,
+    active: isEnabled,
     roles: frappe_roles,  // 🔴 Frappe system roles
     microsoftId: frappeUser.name  // Store Frappe name as reference
   };
@@ -271,7 +273,9 @@ exports.syncUserByEmail = async (req, res) => {
       });
     }
     
-    if (frappeUser.enabled !== 1) {
+    // Frappe có thể gửi enabled là string "1" hoặc number 1, cần normalize
+    const isEnabled = frappeUser.enabled === 1 || frappeUser.enabled === "1" || frappeUser.enabled === true;
+    if (!isEnabled) {
       return res.status(400).json({
         success: false,
         message: `User is disabled in Frappe: ${email}`
@@ -350,8 +354,10 @@ exports.webhookUserChanged = async (req, res) => {
     
     if (actualEvent === 'insert' || actualEvent === 'update' || actualEvent === 'after_insert' || actualEvent === 'on_update') {
       // Chỉ sync enabled users
-      if (doc.enabled !== 1) {
-        console.log(`⏭️  Skipping disabled user: ${doc.name}`);
+      // Frappe có thể gửi enabled là string "1" hoặc number 1, cần normalize
+      const isEnabled = doc.enabled === 1 || doc.enabled === "1" || doc.enabled === true;
+      if (!isEnabled) {
+        console.log(`⏭️  Skipping disabled user: ${doc.name} (enabled: ${doc.enabled}, type: ${typeof doc.enabled})`);
         return res.status(200).json({
           success: true,
           message: 'User is disabled, skipped'

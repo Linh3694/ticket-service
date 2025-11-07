@@ -34,9 +34,28 @@ const fileFilter = (req, file, cb) => {
 const uploadMessage = multer({
   storage,
   limits: {
-    fileSize: parseInt(process.env.MAX_FILE_SIZE) || 10 * 1024 * 1024, // 10MB default
+    fileSize: parseInt(process.env.MAX_FILE_SIZE) || 10 * 1024 * 1024, // 10MB per file
+    files: 15, // Maximum 15 files
   },
   fileFilter,
 });
+
+// Export both single and array upload functions
+uploadMessage.single = multer({
+  storage,
+  limits: {
+    fileSize: parseInt(process.env.MAX_FILE_SIZE) || 10 * 1024 * 1024,
+  },
+  fileFilter,
+}).single;
+
+uploadMessage.array = multer({
+  storage,
+  limits: {
+    fileSize: parseInt(process.env.MAX_FILE_SIZE) || 10 * 1024 * 1024,
+    files: 15,
+  },
+  fileFilter,
+}).array;
 
 module.exports = uploadMessage;

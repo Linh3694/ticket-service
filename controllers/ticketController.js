@@ -1098,7 +1098,20 @@ exports.sendMessage = async (req, res) => {
       }
     }
 
-    if (req.file) {
+    // Handle multiple files
+    if (req.files && req.files.length > 0) {
+      // Multiple images
+      req.files.forEach(file => {
+        const filePath = `/uploads/Messages/${file.filename}`;
+        ticket.messages.push({
+          sender: req.user._id,
+          text: filePath,
+          timestamp: new Date(),
+          type: "image",
+        });
+      });
+    } else if (req.file) {
+      // Single file (backward compatibility)
       const filePath = `/uploads/Messages/${req.file.filename}`;
       ticket.messages.push({
         sender: req.user._id,
@@ -1107,6 +1120,7 @@ exports.sendMessage = async (req, res) => {
         type: "image",
       });
     } else {
+      // Text message
       if (!text?.trim()) {
         return res.status(400).json({
           success: false,
