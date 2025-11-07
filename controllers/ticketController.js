@@ -511,16 +511,19 @@ exports.getTicketHistory = async (req, res) => {
     }
 
     // Sort history theo thời gian mới nhất trước
+    // Action đã được normalize từ logFormatter khi tạo, chỉ cần normalize user.fullname
     const sortedHistory = ticket.history
       .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
       .map(entry => ({
         _id: entry._id,
         timestamp: entry.timestamp,
-        action: entry.action,
+        action: entry.action, // Action đã được format sẵn từ logFormatter với tên đã normalize
         user: entry.user ? {
-          ...entry.user.toObject(),
-          fullname: normalizeVietnameseName(entry.user.fullname) // Normalize tên để đồng nhất
-        } : entry.user
+          _id: entry.user._id,
+          email: entry.user.email,
+          avatarUrl: entry.user.avatarUrl,
+          fullname: normalizeVietnameseName(entry.user.fullname) // Normalize tên user để đồng nhất
+        } : null
       }));
 
     console.log(`✅ [getTicketHistory] Found ${sortedHistory.length} history entries for ticket ${ticketId}`);

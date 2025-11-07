@@ -13,7 +13,10 @@ function normalizeVietnameseName(fullname) {
   // "Linh Nguyễn Hải" -> "Nguyễn Hải Linh"
   const firstWord = parts[0];
   const remainingWords = parts.slice(1);
-  return `${remainingWords.join(' ')} ${firstWord}`;
+  const result = `${remainingWords.join(' ')} ${firstWord}`;
+
+  console.log(`🔄 [normalizeVietnameseName] "${fullname}" -> "${result}"`);
+  return result;
 }
 
 // Helper function to translate status to Vietnamese
