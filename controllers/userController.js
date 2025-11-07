@@ -71,7 +71,7 @@ async function getAllFrappeUsers(token) {
     const allUsers = [];
     const seenEmails = new Set(); // Track seen emails to detect duplicates
     let start = 0;
-    const pageLength = 500; // Load 500 users per page (Frappe supports this)
+    const pageLength = 2500; // Load 500 users per page (Frappe supports this)
     let hasMore = true;
     const maxPages = 20; // Safety limit: max 20 pages (10000 users)
     let pageCount = 0;
