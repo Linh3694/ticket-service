@@ -289,14 +289,18 @@ exports.createTicket = async (req, res) => {
     // 4️⃣ Log history
     await logTicketHistory(
       newTicket._id,
-      `Ticket created by ${req.user.fullname || req.user.email}`,
+      `Ticket created by <strong>${reverseName(req.user.fullname || req.user.email)}</strong>`,
       userId
     );
 
     if (assignedToId) {
+      // Get assigned user info for history log
+      const SupportTeamMember = require('../models/SupportTeamMember');
+      const assignedMember = await SupportTeamMember.findById(assignedToId).select('fullname');
+
       await logTicketHistory(
         newTicket._id,
-        `Auto-assigned to support team member`,
+        `Auto-assigned to <strong>${reverseName(assignedMember?.fullname || 'Unknown')}</strong>`,
         userId
       );
     }
@@ -1475,10 +1479,21 @@ exports.assignTicketToMe = async (req, res) => {
     ticket.acceptedAt = new Date();
     ticket.updatedAt = new Date();
 
+    // Helper function to reverse name parts
+    const reverseName = (fullname) => {
+      if (!fullname) return fullname;
+      const parts = fullname.trim().split(' ');
+      if (parts.length <= 1) return fullname;
+      // Đảo thứ tự: từ "Nguyễn Văn A" thành "Văn A Nguyễn"
+      const firstName = parts[0]; // Nguyễn
+      const rest = parts.slice(1); // [Văn, A]
+      return rest.join(' ') + ' ' + firstName; // "Văn A Nguyễn"
+    };
+
     // Log history
     ticket.history.push({
       timestamp: new Date(),
-      action: `<strong>${req.user.fullname}</strong> đã nhận ticket từ <strong>${previousAssignedTo}</strong>. Trạng thái chuyển sang "Đang xử lý"`,
+      action: `<strong>${reverseName(req.user.fullname)}</strong> đã nhận ticket từ <strong>${reverseName(previousAssignedTo)}</strong>. Trạng thái chuyển sang <strong>Đang xử lý</strong>`,
       user: userId
     });
 
