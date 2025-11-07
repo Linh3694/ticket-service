@@ -1,3 +1,4 @@
+const qs = require('qs');
 const axios = require('axios');
 const User = require('../models/Users');
 
@@ -80,24 +81,23 @@ async function getAllFrappeUsers(token) {
       pageCount++;
       const listResponse = await axios.post(
         `${FRAPPE_API_URL}/api/method/frappe.client.get_list`,
-        {
+        qs.stringify({
           doctype: "User",
-          fields: [
+          fields: JSON.stringify([
             "name", "email", "full_name", "first_name", "middle_name", "last_name",
             "user_image", "enabled", "disabled", "location", "department",
             "job_title", "designation", "employee_code", "microsoft_id",
             "roles", "docstatus", "user_type"
-          ],
-          filters: [["enabled", "=", 1]],
+          ]),
+          filters: JSON.stringify([["enabled", "=", 1]]),
           limit_start: start,
           limit_page_length: pageLength,
           order_by: "name asc"
-        },
+        }),
         {
           headers: {
             'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json',
-            'Accept': 'application/json'
+            'Content-Type': 'application/x-www-form-urlencoded'
           }
         }
       );
