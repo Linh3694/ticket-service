@@ -109,21 +109,30 @@ async function getAllFrappeUsers(token) {
       } else {
         // Detect duplicate data (infinite loop protection)
         let newUsersCount = 0;
+        let duplicateEmails = [];
         for (const user of userList) {
           const email = user.email || user.name;
-          if (email && !seenEmails.has(email)) {
-            seenEmails.add(email);
-            newUsersCount++;
+          if (email) {
+            if (!seenEmails.has(email)) {
+              seenEmails.add(email);
+              newUsersCount++;
+            } else {
+              duplicateEmails.push(email);
+            }
           }
         }
         
+        console.log(`   🆕 ${newUsersCount} new users, ${duplicateEmails.length} duplicates in this page`);
+        
+        if (duplicateEmails.length > 0) {
+          console.log(`   🔄 Sample duplicates: ${duplicateEmails.slice(0, 3).join(', ')}`);
+        }
+        
         if (newUsersCount === 0) {
-          console.log(`   ⚠️  No new users in this page - stopping (likely reached end or duplicate data)`);
+          console.log(`   ⚠️  No new users - stopping (all duplicates or reached end)`);
           hasMore = false;
           break;
         }
-        
-        console.log(`   🆕 ${newUsersCount} new users in this page`);
         
         // Filter enabled users (bao gồm cả System Users và Website Users)
         // Priority: user_type > enabled field > disabled field > docstatus
