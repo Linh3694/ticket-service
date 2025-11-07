@@ -71,9 +71,9 @@ async function getAllFrappeUsers(token) {
     const allUsers = [];
     const seenEmails = new Set(); // Track seen emails to detect duplicates
     let start = 0;
-    const pageLength = 20; // Frappe default/max limit seems to be 20
+    const pageLength = 500; // Load 500 users per page (Frappe supports this)
     let hasMore = true;
-    const maxPages = 100; // Safety limit: max 100 pages (2000 users)
+    const maxPages = 20; // Safety limit: max 20 pages (10000 users)
     let pageCount = 0;
 
     while (hasMore && pageCount < maxPages) {
@@ -88,7 +88,10 @@ async function getAllFrappeUsers(token) {
               'job_title', 'designation', 'employee_code', 'microsoft_id',
               'roles', 'docstatus', 'user_type'
             ]),
-            // Không filter ở API level - sẽ filter ở code để lấy hết users
+            // Add back filter để Frappe chỉ trả enabled users
+            filters: JSON.stringify([
+              ["User", "enabled", "=", 1]
+            ]),
             limit_start: start,
             limit_page_length: pageLength,
             order_by: 'name asc'
