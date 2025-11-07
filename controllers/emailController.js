@@ -12,25 +12,45 @@ const ticketController = require("./ticketController");
 const { convert } = require('html-to-text'); // Added import for html-to-text
 const SupportTeamMember = require("../models/SupportTeamMember");
 
-// Khởi tạo OAuth 2.0 credentials
-const credential = process.env.TENANTTICKET_ID ? new ClientSecretCredential(
-  process.env.TENANTTICKET_ID,
-  process.env.CLIENTTICKET_ID,
-  process.env.CLIENTTICKET_SECRET
-) : null;
+// Khởi tạo OAuth 2.0 credentials (chỉ khi có đầy đủ config)
+let graphClient = null;
 
-const authProvider = new TokenCredentialAuthenticationProvider(credential, {
-  scopes: ["https://graph.microsoft.com/.default"],
-});
+if (process.env.TENANT_ID && process.env.CLIENT_ID && process.env.CLIENT_SECRET) {
+  const credential = new ClientSecretCredential(
+    process.env.TENANT_ID,
+    process.env.CLIENT_ID,
+    process.env.CLIENT_SECRET
+  );
 
-const graphClient = Client.initWithMiddleware({
-  authProvider: authProvider,
-});
+  const authProvider = new TokenCredentialAuthenticationProvider(credential, {
+    scopes: ["https://graph.microsoft.com/.default"],
+  });
+
+  graphClient = Client.initWithMiddleware({
+    authProvider: authProvider,
+  });
+
+  console.log('✅ [Email] Microsoft Graph client initialized');
+} else {
+  console.warn('⚠️  [Email] Microsoft Graph credentials not configured. Email features will be disabled.');
+}
 
 // Hàm lấy access token cho OAuth 2.0
 const getAccessToken = async () => {
+  if (!graphClient) {
+    throw new Error("Microsoft Graph client not initialized - missing Azure credentials");
+  }
+
   try {
     console.log("📧 [Email] Đang lấy access token...");
+
+    // Sử dụng credential từ closure (được tạo trong if block ở trên)
+    const credential = new ClientSecretCredential(
+      process.env.TENANT_ID,
+      process.env.CLIENT_ID,
+      process.env.CLIENT_SECRET
+    );
+
     const token = await credential.getToken("https://graph.microsoft.com/.default");
     console.log("✅ [Email] Access token lấy thành công!");
     return token.token;
@@ -65,6 +85,13 @@ const createTransporter = async () => {
 // A) Hàm gửi email cập nhật trạng thái ticket
 exports.sendTicketStatusEmail = async (req, res) => {
   try {
+    if (!graphClient) {
+      return res.status(500).json({
+        success: false,
+        message: "Email sending disabled - Microsoft Graph credentials not configured"
+      });
+    }
+
     const { ticketId, recipientEmail } = req.body;
     console.log("📧 [Email] Đang gửi email cho ticket:", ticketId, "tới:", recipientEmail);
 
@@ -96,6 +123,13 @@ exports.sendTicketStatusEmail = async (req, res) => {
 // B) Hàm đọc email từ inbox và tạo ticket (dùng Microsoft Graph API)
 exports.fetchEmailsAndCreateTickets = async (req, res) => {
   try {
+    if (!graphClient) {
+      return res.status(500).json({
+        success: false,
+        message: "Email processing disabled - Microsoft Graph credentials not configured"
+      });
+    }
+
     console.log("📧 [Email] Đang đọc email từ inbox...");
 
     // Sử dụng /users/{EMAIL_USER} thay vì /me
@@ -227,6 +261,11 @@ exports.runEmailSync = async () => {
 // D) Hàm gửi email thông báo cho support team khi có ticket mới
 exports.sendNewTicketNotification = async (ticket) => {
   try {
+    if (!graphClient) {
+      console.warn("⚠️  [Email] Skipping email notification - Microsoft Graph not configured");
+      return;
+    }
+
     console.log("📧 [Email] Gửi thông báo ticket mới cho support team...");
 
     // Lấy danh sách support team members
