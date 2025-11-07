@@ -91,17 +91,26 @@ async function getAllFrappeUsers(token) {
       );
       
       const userList = listResponse.data.data || [];
-      console.log(`📦 Page ${Math.floor(start / pageLength) + 1}: Found ${userList.length} users`);
+      const totalCount = listResponse.data.total_count || listResponse.data.total || userList.length;
+      
+      console.log(`📦 Page ${Math.floor(start / pageLength) + 1}: Found ${userList.length} users (Total in Frappe: ${totalCount}, limit_start: ${start})`);
       
       if (userList.length === 0) {
         hasMore = false;
       } else {
         allUsers.push(...userList);
-        start += pageLength;
         
-        // Nếu số users trả về ít hơn pageLength, đã hết data
-        if (userList.length < pageLength) {
+        // Kiểm tra xem đã lấy hết chưa
+        if (allUsers.length >= totalCount) {
+          console.log(`✅ Reached total count: ${allUsers.length} >= ${totalCount}`);
           hasMore = false;
+        } else if (userList.length < pageLength) {
+          // Nếu số users trả về ít hơn pageLength, đã hết data
+          console.log(`✅ Last page reached (returned ${userList.length} < ${pageLength})`);
+          hasMore = false;
+        } else {
+          // Tiếp tục fetch page tiếp theo
+          start += pageLength;
         }
       }
     }
