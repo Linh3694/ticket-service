@@ -65,18 +65,15 @@ async function getFrappeUserDetail(userEmail, token) {
 // Fetch enabled users từ Frappe (chỉ lấy users đang active)
 async function getAllFrappeUsers(token) {
   try {
-    console.log('🔍 [Sync] Fetching enabled Frappe users only...');
+    console.log('🔍 [Sync] Fetching enabled users from Frappe...');
 
     // Paginate để lấy TẤT CẢ enabled users
-    // Thêm filter enabled=1 để chỉ lấy users đang active
     const allUsers = [];
     let start = 0;
-    const pageLength = 20; // Frappe có thể giới hạn mặc định là 20
+    const pageLength = 100; // Fetch 100 users per page for better performance
     let hasMore = true;
-    const maxPages = 50; // Safety limit: max 50 pages (~1000 users) để tránh infinite loop
-    let pageCount = 0;
 
-    while (hasMore && pageCount < maxPages) {
+    while (hasMore) {
       const listResponse = await axios.get(
         `${FRAPPE_API_URL}/api/resource/User`,
         {
@@ -104,38 +101,9 @@ async function getAllFrappeUsers(token) {
         }
       );
 
-      pageCount++;
       const userList = listResponse.data.data || [];
-      const totalCount = listResponse.data.total_count || listResponse.data.total;
-
-      console.log(`📦 Page ${pageCount}: Found ${userList.length} users (limit_start: ${start}, limit_page_length: ${pageLength})`);
-      
-      // Debug: Log API response structure (chỉ log page đầu tiên)
-      if (pageCount === 1) {
-        console.log(`🔍 [Debug] API Response structure:`);
-        console.log(`   - Has data array: ${!!listResponse.data.data}`);
-        console.log(`   - Data length: ${userList.length}`);
-        console.log(`   - Total count: ${totalCount || 'N/A'}`);
-        if (userList.length > 0) {
-          const firstUser = userList[0];
-          console.log(`   - First user keys: ${Object.keys(firstUser).join(', ')}`);
-        }
-      }
-
-      // Debug: Check enabled field values in first few users
-      if (pageCount <= 3 && userList.length > 0) { // Debug first 3 pages
-        console.log(`🔍 [Debug] Page ${pageCount} users:`);
-        userList.slice(0, 3).forEach((user, idx) => {
-          console.log(`   User ${idx + 1}: email=${user.email}, enabled=${user.enabled} (type: ${typeof user.enabled}), docstatus=${user.docstatus}`);
-        });
-      }
-
-      if (totalCount) {
-        console.log(`   📊 Reported total_count: ${totalCount}`);
-      }
 
       if (userList.length === 0) {
-        console.log(`✅ No more users found, stopping pagination`);
         hasMore = false;
       } else {
         // Filter enabled users (bao gồm cả System Users và Website Users)
@@ -167,221 +135,46 @@ async function getAllFrappeUsers(token) {
           return true;
         });
 
-        console.log(`   ✅ Filtered ${enabledUsers.length} enabled users from ${userList.length} total users`);
-        
-        // Debug: Log why users were filtered out (chỉ log page đầu tiên)
-        if (pageCount === 1 && enabledUsers.length < userList.length) {
-          const filteredOut = userList.filter(u => !enabledUsers.includes(u));
-          console.log(`   ⚠️  Filtered out ${filteredOut.length} users:`);
-          filteredOut.slice(0, 5).forEach(u => {
-            console.log(`      - ${u.email}: enabled=${u.enabled}, disabled=${u.disabled}, docstatus=${u.docstatus}`);
-          });
-        }
-        
-        // Debug: Log sample of enabled users (chỉ log page đầu tiên)
-        if (pageCount === 1 && enabledUsers.length > 0) {
-          console.log(`   ✅ Sample enabled users:`);
-          enabledUsers.slice(0, 3).forEach(u => {
-            console.log(`      - ${u.email}: enabled=${u.enabled}, disabled=${u.disabled}, docstatus=${u.docstatus}`);
-          });
-        }
-
         allUsers.push(...enabledUsers);
 
-        // Safety check: stop if we hit max pages
-        if (pageCount >= maxPages) {
-          console.log(`⚠️  Reached max pages limit (${maxPages}), stopping to prevent infinite loop`);
-          console.log(`   📊 Collected ${allUsers.length} enabled users so far`);
-          hasMore = false;
-        }
-        // KHÔNG tin vào total_count - tiếp tục paginate cho đến khi không còn data
-        else if (userList.length < pageLength) {
-          // Nếu số users trả về ít hơn pageLength, đã hết data
-          console.log(`✅ Last page reached (returned ${userList.length} < ${pageLength})`);
+        // Check if we've reached the last page
+        if (userList.length < pageLength) {
           hasMore = false;
         } else {
-          // Tiếp tục fetch page tiếp theo (bỏ qua total_count vì có thể không chính xác)
           start += pageLength;
-          console.log(`   ➡️  Continuing to next page (start: ${start})`);
         }
+      }
+      
+      // Progress log every 500 users
+      if (allUsers.length % 500 === 0 && allUsers.length > 0) {
+        console.log(`   📊 Fetched ${allUsers.length} enabled users so far...`);
       }
     }
 
-    console.log(`✅ Found total ${allUsers.length} enabled users in Frappe`);
+    console.log(`✅ Found ${allUsers.length} enabled users from Frappe`);
 
-    // Fetch chi tiết từng user để lấy roles và user_type đầy đủ
-    // List API không trả về roles và user_type đầy đủ, cần fetch detail
-    console.log(`🔍 [Sync] Fetching detailed user info (roles, user_type) for ${allUsers.length} users...`);
-    
-    const detailedUsers = [];
-    const batchSize = 20; // Fetch 20 users at a time để không quá tải API
-    
-    for (let i = 0; i < allUsers.length; i += batchSize) {
-      const batch = allUsers.slice(i, i + batchSize);
-      const batchNumber = Math.floor(i / batchSize) + 1;
-      const totalBatches = Math.ceil(allUsers.length / batchSize);
-      
-      console.log(`📦 [Sync] Fetching details for batch ${batchNumber}/${totalBatches} (${batch.length} users)...`);
-      
-      const batchPromises = batch.map(async (user) => {
-        try {
-          const userEmail = user.email || user.name || '';
-          if (!userEmail) return null;
-          
-          // Fetch chi tiết user từ Frappe API
-          const detailResponse = await axios.get(
-            `${FRAPPE_API_URL}/api/resource/User/${userEmail}`,
-            {
-              headers: {
-                'Authorization': `Bearer ${token}`,
-                'X-Frappe-CSRF-Token': token
-              }
-            }
-          );
-          
-          const userDetail = detailResponse.data.data || {};
-          
-          // Trong Frappe, User.name thường là email, nếu email field không có thì dùng name
-          const finalEmail = userDetail.email || user.email || user.name || '';
-          
-          // Debug: Log structure của userDetail để xem roles có format như thế nào (chỉ log 1 user đầu tiên)
-          if (i === 0 && batchNumber === 1) {
-            console.log(`🔍 [Debug] User detail API response structure for ${finalEmail}:`);
-            console.log(`   - Has roles field: ${!!userDetail.roles}`);
-            console.log(`   - Roles type: ${typeof userDetail.roles}`);
-            console.log(`   - Roles is array: ${Array.isArray(userDetail.roles)}`);
-            if (userDetail.roles) {
-              console.log(`   - Roles value: ${JSON.stringify(userDetail.roles).substring(0, 200)}`);
-            }
-            // Log tất cả keys để xem có field nào khác chứa roles không
-            console.log(`   - All keys: ${Object.keys(userDetail).join(', ')}`);
-          }
-          
-          // Normalize roles từ detail API
-          // Roles có thể là array hoặc child table trong Frappe (Table field với options="Has Role")
-          let normalizedRoles = [];
-          if (Array.isArray(userDetail.roles)) {
-            // Nếu là array, có thể là array of objects hoặc array of strings
-            normalizedRoles = userDetail.roles.map((r) => {
-              if (typeof r === 'string') return r;
-              // Nếu là object, có thể có field 'role' hoặc 'name'
-              return r?.role || r?.name || (typeof r === 'object' ? JSON.stringify(r) : String(r));
-            }).filter(Boolean);
-          } else if (userDetail.roles && typeof userDetail.roles === 'object') {
-            // Nếu roles là object, có thể là child table format
-            // Thử parse như object với keys là indices
-            const rolesArray = Object.values(userDetail.roles);
-            normalizedRoles = rolesArray.map((r) => {
-              if (typeof r === 'string') return r;
-              return r?.role || r?.name || String(r);
-            }).filter(Boolean);
-          }
-          
-          // Nếu vẫn không có roles và không phải là batch đầu tiên (để tránh spam log), thử fetch từ Has Role
-          // Nhưng skip nếu đã có quá nhiều lỗi để tránh làm chậm sync
-          if (normalizedRoles.length === 0 && (i < 100 || Math.random() < 0.1)) {
-            try {
-              // Thử query Has Role table để lấy roles (chỉ thử một vài users để tránh spam)
-              const hasRoleResponse = await axios.get(
-                `${FRAPPE_API_URL}/api/resource/Has Role`,
-                {
-                  params: {
-                    filters: JSON.stringify([
-                      ["Has Role", "parent", "=", finalEmail],
-                      ["Has Role", "parenttype", "=", "User"]
-                    ]),
-                    fields: JSON.stringify(["role"]),
-                    limit_page_length: 100
-                  },
-                  headers: {
-                    'Authorization': `Bearer ${token}`,
-                    'X-Frappe-CSRF-Token': token
-                  }
-                }
-              );
-              
-              if (hasRoleResponse.data && hasRoleResponse.data.data) {
-                normalizedRoles = hasRoleResponse.data.data
-                  .map(item => item.role)
-                  .filter(Boolean);
-              }
-            } catch (rolesErr) {
-              // Chỉ log warning cho một vài users đầu tiên để tránh spam
-              if (i < 10) {
-                console.warn(`⚠️  [Sync] Could not fetch roles from Has Role API for ${finalEmail}: ${rolesErr.message}`);
-              }
-              // Không thử API method nữa vì nó cũng đang fail với 500
-            }
-          }
-          
-          return {
-            name: userDetail.name || user.name,
-            email: finalEmail,
-            full_name: userDetail.full_name || user.full_name || finalEmail,
-            first_name: userDetail.first_name || user.first_name,
-            middle_name: userDetail.middle_name || user.middle_name,
-            last_name: userDetail.last_name || user.last_name,
-            user_image: userDetail.user_image || user.user_image || '',
-            enabled: userDetail.enabled !== undefined ? userDetail.enabled : user.enabled,
-            disabled: userDetail.disabled !== undefined ? userDetail.disabled : user.disabled,
-            location: userDetail.location || user.location || '',
-            department: userDetail.department || user.department || '',
-            job_title: userDetail.job_title || user.job_title,
-            designation: userDetail.designation || user.designation,
-            employee_code: userDetail.employee_code || user.employee_code,
-            employeeCode: userDetail.employeeCode || user.employeeCode,
-            microsoft_id: userDetail.microsoft_id || user.microsoft_id,
-            microsoftId: userDetail.microsoftId || user.microsoftId,
-            docstatus: userDetail.docstatus !== undefined ? userDetail.docstatus : user.docstatus,
-            user_type: userDetail.user_type || user.user_type || 'Unknown', // Quan trọng: lấy từ detail API
-            roles: normalizedRoles, // Roles từ detail API
-            roles_list: normalizedRoles
-          };
-        } catch (err) {
-          console.warn(`⚠️  [Sync] Failed to fetch detail for ${user.email || user.name}: ${err.message}`);
-          // Fallback về data từ list API nếu fetch detail fail
-          const userEmail = user.email || user.name || '';
-          return {
-            name: user.name,
-            email: userEmail,
-            full_name: user.full_name || user.name,
-            first_name: user.first_name,
-            middle_name: user.middle_name,
-            last_name: user.last_name,
-            user_image: user.user_image || '',
-            enabled: user.enabled,
-            disabled: user.disabled,
-            location: user.location || '',
-            department: user.department || '',
-            job_title: user.job_title,
-            designation: user.designation,
-            employee_code: user.employee_code,
-            employeeCode: user.employeeCode,
-            microsoft_id: user.microsoft_id,
-            microsoftId: user.microsoftId,
-            docstatus: user.docstatus,
-            user_type: user.user_type || 'Unknown',
-            roles: [],
-            roles_list: []
-          };
-        }
-      });
-      
-      const batchResults = await Promise.allSettled(batchPromises);
-      batchResults.forEach(result => {
-        if (result.status === 'fulfilled' && result.value) {
-          detailedUsers.push(result.value);
-        }
-      });
-      
-      // Progress logging
-      if ((i + batchSize) % 100 === 0 || i + batchSize >= allUsers.length) {
-        console.log(`   ✅ Progress: ${detailedUsers.length}/${allUsers.length} users fetched`);
-      }
-    }
-
-    console.log(`✅ Using ${detailedUsers.length} enabled users with full details (roles and user_type from detail API)`);
-    return detailedUsers;
+    // Không cần fetch detail nữa - list API đã đủ thông tin cần thiết
+    // Roles thường empty và Has Role API bị 403, không cần thiết cho sync
+    return allUsers.map(user => ({
+      name: user.name,
+      email: user.email || user.name,
+      full_name: user.full_name,
+      first_name: user.first_name,
+      middle_name: user.middle_name,
+      last_name: user.last_name,
+      user_image: user.user_image,
+      enabled: user.enabled,
+      disabled: user.disabled,
+      location: user.location,
+      department: user.department,
+      job_title: user.job_title,
+      designation: user.designation,
+      employee_code: user.employee_code,
+      microsoft_id: user.microsoft_id,
+      docstatus: user.docstatus,
+      user_type: user.user_type,
+      roles: [] // List API không trả về roles, và Has Role API bị 403
+    }));
   } catch (error) {
     console.error('❌ Error fetching Frappe users:', error.message);
     if (error.response) {
