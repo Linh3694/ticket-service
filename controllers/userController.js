@@ -78,32 +78,31 @@ async function getAllFrappeUsers(token) {
 
     while (hasMore && pageCount < maxPages) {
       pageCount++;
-      const listResponse = await axios.get(
-        `${FRAPPE_API_URL}/api/resource/User`,
+      const listResponse = await axios.post(
+        `${FRAPPE_API_URL}/api/method/frappe.client.get_list`,
         {
-          params: {
-            fields: JSON.stringify([
-              'name', 'email', 'full_name', 'first_name', 'middle_name', 'last_name',
-              'user_image', 'enabled', 'disabled', 'location', 'department',
-              'job_title', 'designation', 'employee_code', 'microsoft_id',
-              'roles', 'docstatus', 'user_type'
-            ]),
-            // Add back filter enabled users
-            filters: JSON.stringify([
-              ["User", "enabled", "=", 1]
-            ]),
-            limit_start: start,
-            limit_page_length: pageLength,
-            order_by: 'name asc'
-          },
+          doctype: "User",
+          fields: [
+            "name", "email", "full_name", "first_name", "middle_name", "last_name",
+            "user_image", "enabled", "disabled", "location", "department",
+            "job_title", "designation", "employee_code", "microsoft_id",
+            "roles", "docstatus", "user_type"
+          ],
+          filters: [["enabled", "=", 1]],
+          limit_start: start,
+          limit_page_length: pageLength,
+          order_by: "name asc"
+        },
+        {
           headers: {
             'Authorization': `Bearer ${token}`,
-            'X-Frappe-CSRF-Token': token
+            'Content-Type': 'application/json'
           }
         }
       );
 
-      const userList = listResponse.data.data || [];
+      // frappe.client.get_list trả về data trong "message" field
+      const userList = listResponse.data.message || listResponse.data.data || [];
 
       if (userList.length === 0) {
         hasMore = false;
