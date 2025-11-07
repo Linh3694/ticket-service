@@ -116,10 +116,10 @@ async function getAllFrappeUsers(token) {
         hasMore = false;
       } else {
         // Filter enabled users only (double check)
-        // In Frappe, only System Users are typically enabled for login
+        // In Frappe, users with docstatus = 0 (active) are typically enabled
         const enabledUsers = userList.filter(user => {
-          const isSystemUser = user.user_type === 'System User';
-          return isSystemUser;
+          const isActive = user.docstatus === 0;
+          return isActive;
         });
 
         console.log(`   ✅ Filtered ${enabledUsers.length} enabled users from ${userList.length} total users`);
@@ -178,8 +178,8 @@ async function getAllFrappeUsers(token) {
 // Format Frappe user → Users model
 function formatFrappeUser(frappeUser) {
   const frappe_roles = frappeUser.roles?.map(r => r.role) || [];
-  // In Frappe, System Users are considered enabled
-  const isEnabled = frappeUser.user_type === 'System User';
+  // In Frappe, users with docstatus = 0 are considered enabled (active)
+  const isEnabled = frappeUser.docstatus === 0;
 
   return {
     email: frappeUser.email,
@@ -418,14 +418,16 @@ exports.debugFetchUsers = async (req, res) => {
       disabled_1_string: userList.filter(u => u.disabled === "1").length,
       disabled_0: userList.filter(u => u.disabled === 0 || u.disabled === "0" || u.disabled === false).length,
       disabled_null: userList.filter(u => u.disabled === null || u.disabled === undefined).length,
-      // docstatus
-      docstatus_0: userList.filter(u => u.docstatus === 0).length,
-      docstatus_1: userList.filter(u => u.docstatus === 1).length,
-      docstatus_2: userList.filter(u => u.docstatus === 2).length,
+      // docstatus (most reliable indicator)
+      docstatus_0: userList.filter(u => u.docstatus === 0).length,  // Active users
+      docstatus_1: userList.filter(u => u.docstatus === 1).length,  // Submitted
+      docstatus_2: userList.filter(u => u.docstatus === 2).length,  // Cancelled
+      docstatus_null: userList.filter(u => u.docstatus === null || u.docstatus === undefined).length,
       // user_type
       user_type_null: userList.filter(u => !u.user_type).length,
       user_type_system: userList.filter(u => u.user_type === 'System User').length,
-      user_type_website: userList.filter(u => u.user_type === 'Website User').length
+      user_type_website: userList.filter(u => u.user_type === 'Website User').length,
+      user_type_other: userList.filter(u => u.user_type && u.user_type !== 'System User' && u.user_type !== 'Website User').length
     };
 
     console.log('📊 Field analysis:', fieldStats);
@@ -435,9 +437,7 @@ exports.debugFetchUsers = async (req, res) => {
       name: user.name,
       enabled: user.enabled,
       disabled: user.disabled,
-      enabled_type: typeof user.enabled,
-      disabled_type: typeof user.disabled,
-      docstatus: user.docstatus,
+      docstatus: user.docstatus,  // This is the key field for active users
       user_type: user.user_type,
       full_name: user.full_name,
       creation: user.creation,
@@ -491,12 +491,12 @@ exports.syncUserByEmail = async (req, res) => {
       });
     }
     
-    // In Frappe, only System Users are considered enabled
-    const isEnabled = frappeUser.user_type === 'System User';
+    // In Frappe, users with docstatus = 0 are considered enabled (active)
+    const isEnabled = frappeUser.docstatus === 0;
     if (!isEnabled) {
       return res.status(400).json({
         success: false,
-        message: `User is not a system user in Frappe: ${email}`
+        message: `User is not active in Frappe: ${email}`
       });
     }
     
@@ -571,14 +571,14 @@ exports.webhookUserChanged = async (req, res) => {
     }
     
     if (actualEvent === 'insert' || actualEvent === 'update' || actualEvent === 'after_insert' || actualEvent === 'on_update') {
-      // Chỉ sync enabled users (System Users)
-      // In Frappe, only System Users are considered enabled
-      const isEnabled = doc.user_type === 'System User';
+      // Chỉ sync enabled users (active users)
+      // In Frappe, users with docstatus = 0 are considered enabled (active)
+      const isEnabled = doc.docstatus === 0;
       if (!isEnabled) {
-        console.log(`⏭️  Skipping non-system user: ${doc.name} (user_type: ${doc.user_type})`);
+        console.log(`⏭️  Skipping inactive user: ${doc.name} (docstatus: ${doc.docstatus})`);
         return res.status(200).json({
           success: true,
-          message: 'User is not a system user, skipped'
+          message: 'User is not active, skipped'
         });
       }
       
