@@ -1536,3 +1536,247 @@ exports.cancelTicketWithReason = async (req, res) => {
     res.status(500).json({ success: false, message: error.message });
   }
 };
+
+/**
+ * ✅ Chấp nhận kết quả với feedback, sao, và badges
+ * POST /:ticketId/accept-feedback
+ * Body: { rating, comment, badges }
+ */
+exports.acceptFeedback = async (req, res) => {
+  try {
+    const { ticketId } = req.params;
+    const { rating, comment, badges } = req.body;
+    const userId = req.user._id;
+    const userEmail = req.user.email;
+
+    console.log(`✅ [acceptFeedback] User: ${userEmail}, Ticket: ${ticketId}, Rating: ${rating}`);
+
+    // Validate input
+    if (!rating || rating < 1 || rating > 5) {
+      return res.status(400).json({
+        success: false,
+        message: 'Vui lòng chọn đánh giá từ 1-5 sao'
+      });
+    }
+
+    if (!comment || !comment.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Vui lòng nhập feedback'
+      });
+    }
+
+    // Tìm ticket
+    const ticket = await Ticket.findById(ticketId).populate('creator assignedTo');
+    if (!ticket) {
+      return res.status(404).json({
+        success: false,
+        message: 'Ticket không tồn tại'
+      });
+    }
+
+    // Kiểm tra quyền - chỉ creator hoặc assignedTo có thể feedback
+    const isCreator = ticket.creator._id.toString() === userId.toString();
+    if (!isCreator) {
+      return res.status(403).json({
+        success: false,
+        message: 'Chỉ người tạo ticket mới có thể gửi feedback'
+      });
+    }
+
+    // Kiểm tra trạng thái ticket
+    if (ticket.status !== 'Done') {
+      return res.status(400).json({
+        success: false,
+        message: 'Ticket phải ở trạng thái hoàn thành mới có thể gửi feedback'
+      });
+    }
+
+    // Cập nhật feedback
+    ticket.feedback = {
+      assignedTo: ticket.assignedTo?._id,
+      rating: parseInt(rating),
+      comment: comment.trim(),
+      badges: Array.isArray(badges) ? badges : []
+    };
+
+    // Chuyển ticket sang Closed
+    ticket.status = 'Closed';
+    ticket.closedAt = new Date();
+    ticket.updatedAt = new Date();
+
+    // Log history
+    ticket.history.push({
+      timestamp: new Date(),
+      action: `<strong>${req.user.fullname}</strong> đã chấp nhận kết quả với đánh giá <strong>${rating} sao</strong>. Ticket chuyển sang "Đóng".`,
+      user: userId
+    });
+
+    await ticket.save();
+    console.log(`✅ [acceptFeedback] Feedback saved and ticket closed: ${ticketId}`);
+
+    // 🔄 Cập nhật rating cho kỹ thuật viên trong Frappe
+    if (ticket.assignedTo && ticket.assignedTo.email) {
+      try {
+        const frappeService = require('../services/frappeService');
+        const token = req.header('Authorization')?.replace('Bearer ', '');
+
+        // Lấy user info từ Frappe để cập nhật rating
+        const technician = await frappeService.getUserDetails(ticket.assignedTo.email, token);
+        
+        // Tính trung bình rating từ tất cả feedback cho user này
+        const allTicketsWithFeedback = await Ticket.find({
+          'assignedTo._id': ticket.assignedTo._id,
+          'feedback.rating': { $exists: true, $ne: null }
+        });
+
+        const totalRating = allTicketsWithFeedback.reduce((sum, t) => {
+          return sum + (t.feedback?.rating || 0);
+        }, 0);
+
+        const averageRating = allTicketsWithFeedback.length > 0 
+          ? (totalRating / allTicketsWithFeedback.length).toFixed(2)
+          : 0;
+
+        console.log(`📊 [acceptFeedback] Technician ${ticket.assignedTo.email} average rating: ${averageRating}`);
+
+        // Nếu cần, có thể gọi Frappe để lưu rating vào custom field
+        // await frappeService.saveDocument('User', ticket.assignedTo.email, {
+        //   custom_rating: averageRating
+        // }, token);
+
+      } catch (frappeError) {
+        console.warn('⚠️  [acceptFeedback] Could not update Frappe rating:', frappeError.message);
+        // Không fail nếu Frappe update thất bại
+      }
+    }
+
+    // Send notification
+    try {
+      await notificationService.sendTicketUpdateNotification(ticket, 'feedback_received', null);
+    } catch (notifyError) {
+      console.warn('⚠️  Error sending notification:', notifyError.message);
+    }
+
+    // Populate và trả về
+    await ticket.populate('creator assignedTo', 'fullname email avatarUrl');
+
+    res.status(200).json({
+      success: true,
+      message: 'Feedback đã được lưu. Cảm ơn bạn!',
+      data: {
+        _id: ticket._id,
+        ticketCode: ticket.ticketCode,
+        title: ticket.title,
+        status: ticket.status,
+        feedback: ticket.feedback,
+        closedAt: ticket.closedAt,
+        updatedAt: ticket.updatedAt
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Error in acceptFeedback:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Lỗi khi lưu feedback'
+    });
+  }
+};
+
+/**
+ * 🔄 Mở lại ticket (chuyển từ Done/Closed sang Processing)
+ * POST /:ticketId/reopen
+ */
+exports.reopenTicket = async (req, res) => {
+  try {
+    const { ticketId } = req.params;
+    const userId = req.user._id;
+    const userEmail = req.user.email;
+
+    console.log(`🔄 [reopenTicket] User: ${userEmail}, Ticket: ${ticketId}`);
+
+    // Tìm ticket
+    const ticket = await Ticket.findById(ticketId).populate('creator assignedTo');
+    if (!ticket) {
+      return res.status(404).json({
+        success: false,
+        message: 'Ticket không tồn tại'
+      });
+    }
+
+    // Kiểm tra quyền - chỉ creator hoặc assignedTo có thể mở lại
+    const isCreator = ticket.creator._id.toString() === userId.toString();
+    const isAssignedTo = ticket.assignedTo && ticket.assignedTo._id.toString() === userId.toString();
+    const isAdmin = req.user.role === 'admin' || req.user.role === 'superadmin';
+
+    if (!isCreator && !isAssignedTo && !isAdmin) {
+      return res.status(403).json({
+        success: false,
+        message: 'Bạn không có quyền mở lại ticket này'
+      });
+    }
+
+    // Kiểm tra trạng thái ticket - chỉ có thể mở lại từ Done/Closed
+    if (ticket.status !== 'Done' && ticket.status !== 'Closed') {
+      return res.status(400).json({
+        success: false,
+        message: `Ticket đang ở trạng thái "${ticket.status}". Chỉ có thể mở lại ticket ở trạng thái hoàn thành.`
+      });
+    }
+
+    // Cập nhật ticket
+    const previousStatus = ticket.status;
+    ticket.status = 'Processing';
+    ticket.updatedAt = new Date();
+    
+    // Clear feedback nếu đang ở Closed
+    if (previousStatus === 'Closed') {
+      ticket.feedback = {
+        assignedTo: null,
+        rating: null,
+        comment: '',
+        badges: []
+      };
+    }
+
+    // Log history
+    ticket.history.push({
+      timestamp: new Date(),
+      action: `<strong>${req.user.fullname}</strong> đã mở lại ticket. Trạng thái chuyển từ "${previousStatus}" sang "Đang xử lý".`,
+      user: userId
+    });
+
+    await ticket.save();
+    console.log(`✅ [reopenTicket] Ticket reopened: ${ticketId}, new status: Processing`);
+
+    // Send notification
+    try {
+      await notificationService.sendTicketUpdateNotification(ticket, 'reopen', null);
+    } catch (notifyError) {
+      console.warn('⚠️  Error sending notification:', notifyError.message);
+    }
+
+    // Populate và trả về
+    await ticket.populate('creator assignedTo', 'fullname email avatarUrl');
+
+    res.status(200).json({
+      success: true,
+      message: 'Ticket đã được mở lại',
+      data: {
+        _id: ticket._id,
+        ticketCode: ticket.ticketCode,
+        title: ticket.title,
+        status: ticket.status,
+        updatedAt: ticket.updatedAt
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Error in reopenTicket:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Lỗi khi mở lại ticket'
+    });
+  }
+};

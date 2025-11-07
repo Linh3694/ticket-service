@@ -36,5 +36,7 @@ router.put("/:ticketId/subtasks/:subTaskId", authenticate, ticketController.upda
 router.delete("/:ticketId/subtasks/:subTaskId", authenticate, ticketController.deleteSubTask);
 router.put("/:ticketId/assign", authenticate, ticketController.assignTicketToMe);
 router.put("/:ticketId/cancel", authenticate, ticketController.cancelTicketWithReason);
+router.post("/:ticketId/accept-feedback", authenticate, ticketController.acceptFeedback);
+router.post("/:ticketId/reopen", authenticate, ticketController.reopenTicket);
 
 module.exports = router;

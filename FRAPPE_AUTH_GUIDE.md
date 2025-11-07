@@ -40,6 +40,7 @@ Middleware: authMiddleware.authenticate()
 **Vị trí**: `services/frappeService.js`
 
 **Chức năng chính**:
+
 - Token verification
 - User management
 - Document CRUD
@@ -50,26 +51,26 @@ Middleware: authMiddleware.authenticate()
 
 ```javascript
 // Token & User
-verifyTokenAndGetUser(token)
-getUserDetails(userName, token)
-getUsersByRole(roleFilter, token)
-hasRole(userName, role, token)
+verifyTokenAndGetUser(token);
+getUserDetails(userName, token);
+getUsersByRole(roleFilter, token);
+hasRole(userName, role, token);
 
 // Methods
-callMethod(methodName, params, token)
+callMethod(methodName, params, token);
 
 // Documents
-getDocument(doctype, name, options, token)
-getDocuments(doctype, filters, options, token)
-saveDocument(doctype, name, data, token)
-deleteDocument(doctype, name, token)
-searchDocuments(doctype, searchTerm, fields, token)
+getDocument(doctype, name, options, token);
+getDocuments(doctype, filters, options, token);
+saveDocument(doctype, name, data, token);
+deleteDocument(doctype, name, token);
+searchDocuments(doctype, searchTerm, fields, token);
 
 // Files
-uploadFile(fileBuffer, fileName, folderPath, token)
+uploadFile(fileBuffer, fileName, folderPath, token);
 
 // Permissions
-checkPermission(doctype, name, permType, token)
+checkPermission(doctype, name, permType, token);
 ```
 
 ### 3. Helper Layer: frappeApiHelper.js
@@ -81,7 +82,7 @@ checkPermission(doctype, name, permType, token)
 **Ví dụ sử dụng**:
 
 ```javascript
-const frappeHelper = require('../utils/frappeApiHelper');
+const frappeHelper = require("../utils/frappeApiHelper");
 
 // Trong controller
 const getCurrentUser = (req) => {
@@ -93,14 +94,14 @@ const token = frappeHelper.getTokenFromRequest(req);
 // Check role
 const isAdmin = await frappeHelper.userHasRole(
   userEmail,
-  'Administrator',
+  "Administrator",
   token
 );
 
 // Gọi method
 const result = await frappeHelper.callFrappeMethod(
-  'frappe.client.get_list',
-  { doctype: 'User' },
+  "frappe.client.get_list",
+  { doctype: "User" },
   token
 );
 ```
@@ -110,7 +111,7 @@ const result = await frappeHelper.callFrappeMethod(
 ### 1. Lấy User Hiện Tại
 
 ```javascript
-const frappeHelper = require('../utils/frappeApiHelper');
+const frappeHelper = require("../utils/frappeApiHelper");
 
 // Trong controller với authenticate middleware
 const user = frappeHelper.getCurrentUser(req);
@@ -121,8 +122,8 @@ console.log(user.email, user.roles);
 
 ```javascript
 const hasRole = await frappeHelper.userHasRole(
-  'user@example.com',
-  ['IT Helpdesk', 'Administrator'],
+  "user@example.com",
+  ["IT Helpdesk", "Administrator"],
   token
 );
 
@@ -135,7 +136,7 @@ if (hasRole) {
 
 ```javascript
 const result = await frappeHelper.getUsersByRoleFromFrappe(
-  'IT Helpdesk',
+  "IT Helpdesk",
   token
 );
 
@@ -148,7 +149,7 @@ if (result.success) {
 
 ```javascript
 const result = await frappeHelper.callFrappeMethod(
-  'erpnext.selling.doctype.customer.customer.get_customer_list',
+  "erpnext.selling.doctype.customer.customer.get_customer_list",
   { filters: { disabled: 0 } },
   token
 );
@@ -162,24 +163,21 @@ if (result.success) {
 
 ```javascript
 const hasPermission = await frappeHelper.checkDocumentPermission(
-  'Ticket',
+  "Ticket",
   ticketId,
-  'write',
+  "write",
   token
 );
 
 if (!hasPermission) {
-  return res.status(403).json({ message: 'Access denied' });
+  return res.status(403).json({ message: "Access denied" });
 }
 ```
 
 ### 6. Search Users
 
 ```javascript
-const result = await frappeHelper.searchUsersInFrappe(
-  'john',
-  token
-);
+const result = await frappeHelper.searchUsersInFrappe("john", token);
 
 if (result.success) {
   console.log(result.data); // Array of matching users
@@ -210,22 +208,22 @@ JWT_SECRET=your_jwt_secret_here
 ### 1. Basic Authentication
 
 ```javascript
-const { authenticate } = require('../middleware/authMiddleware');
+const { authenticate } = require("../middleware/authMiddleware");
 const router = express.Router();
 
 // Tất cả routes được bảo vệ
-router.get('/tickets', authenticate, ticketController.getTickets);
+router.get("/tickets", authenticate, ticketController.getTickets);
 ```
 
 ### 2. Role-Based Access
 
 ```javascript
-const frappeHelper = require('../utils/frappeApiHelper');
+const frappeHelper = require("../utils/frappeApiHelper");
 
 router.post(
-  '/tickets',
+  "/tickets",
   authenticate,
-  frappeHelper.requireRole(['IT Helpdesk', 'Administrator']),
+  frappeHelper.requireRole(["IT Helpdesk", "Administrator"]),
   ticketController.createTicket
 );
 ```
@@ -234,9 +232,9 @@ router.post(
 
 ```javascript
 router.put(
-  '/tickets/:id',
+  "/tickets/:id",
   authenticate,
-  frappeHelper.requireDocumentPermission('write'),
+  frappeHelper.requireDocumentPermission("write"),
   ticketController.updateTicket
 );
 ```
@@ -259,7 +257,7 @@ try {
 
 ```javascript
 const result = await frappeHelper.callFrappeMethod(
-  'method_name',
+  "method_name",
   params,
   token
 );
@@ -267,7 +265,7 @@ const result = await frappeHelper.callFrappeMethod(
 if (!result.success) {
   return res.status(400).json({
     success: false,
-    message: result.error
+    message: result.error,
   });
 }
 ```
@@ -302,14 +300,14 @@ const response = await axios.get(`${FRAPPE_API_URL}/api/method/...`);
 ```javascript
 // ✅ Good
 const hasPermission = await frappeHelper.checkDocumentPermission(
-  'Ticket',
+  "Ticket",
   ticketId,
-  'write',
+  "write",
   token
 );
 
 if (!hasPermission) {
-  return res.status(403).json({ message: 'Access denied' });
+  return res.status(403).json({ message: "Access denied" });
 }
 
 // Update ticket...
@@ -328,8 +326,8 @@ try {
     return res.status(400).json(user);
   }
 } catch (error) {
-  console.error('Sync failed:', error);
-  return res.status(500).json({ message: 'Failed to sync user' });
+  console.error("Sync failed:", error);
+  return res.status(500).json({ message: "Failed to sync user" });
 }
 ```
 
@@ -338,7 +336,8 @@ try {
 ### 1. "Invalid or expired token"
 
 **Nguyên nhân**: Token hết hạn hoặc không hợp lệ
-**Giải pháp**: 
+**Giải pháp**:
+
 - Refresh token từ client
 - Kiểm tra Frappe token lifetime settings
 
@@ -346,22 +345,25 @@ try {
 
 **Nguyên nhân**: Authorization header không có
 **Giải pháp**:
+
 - Kiểm tra client gửi header `Authorization: Bearer <token>`
 
 ### 3. "User account is disabled"
 
 **Nguyên nhân**: User bị disable trong Frappe
 **Giải pháp**:
+
 - Enable user trong Frappe UI
 - Hoặc gọi API từ Frappe để enable
 
 ### 4. "Frappe API verification failed"
 
-**Nguyên nhân**: 
+**Nguyên nhân**:
+
 - Frappe service down
 - FRAPPE_API_URL sai
 - Network issue
-**Giải pháp**:
+  **Giải pháp**:
 - Kiểm tra Frappe service status
 - Check FRAPPE_API_URL env var
 - Kiểm tra network connectivity
@@ -441,4 +443,3 @@ DEBUG_AUTH=1
 - `utils/frappeApiHelper.js` - Helper methods for controllers
 - `middleware/authMiddleware.js` - Authentication middleware
 - `controllers/*.js` - Usage examples
-
