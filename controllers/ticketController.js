@@ -1073,6 +1073,31 @@ exports.sendMessage = async (req, res) => {
       });
     }
 
+    // Kiểm tra xem người gửi có phải là support team member không
+    const isSupportTeamMember = await SupportTeamMember.findOne({
+      userId: req.user.email || req.user.userId,
+      isActive: true
+    });
+
+    let oldStatus = ticket.status;
+    let newStatus = oldStatus;
+    let statusChanged = false;
+
+    // Logic thay đổi trạng thái dựa trên người gửi
+    if (isSupportTeamMember) {
+      // Support team member gửi comment -> chuyển sang "Waiting for Customer"
+      if (ticket.status === "Processing") {
+        newStatus = "Waiting for Customer";
+        statusChanged = true;
+      }
+    } else {
+      // User thường gửi comment -> chuyển về "Processing"
+      if (ticket.status === "Waiting for Customer") {
+        newStatus = "Processing";
+        statusChanged = true;
+      }
+    }
+
     if (req.file) {
       const filePath = `/uploads/Messages/${req.file.filename}`;
       ticket.messages.push({
@@ -1093,6 +1118,23 @@ exports.sendMessage = async (req, res) => {
         text,
         timestamp: new Date(),
         type: "text",
+      });
+    }
+
+    // Cập nhật trạng thái nếu có thay đổi
+    if (statusChanged) {
+      ticket.status = newStatus;
+      ticket.updatedAt = new Date();
+
+      // Thêm history log
+      const statusChangeMessage = isSupportTeamMember
+        ? `Support team đã gửi bình luận - trạng thái thay đổi từ "${translateStatus(oldStatus)}" sang "${translateStatus(newStatus)}"`
+        : `Người dùng đã phản hồi - trạng thái thay đổi từ "${translateStatus(oldStatus)}" sang "${translateStatus(newStatus)}"`;
+
+      ticket.history.push({
+        timestamp: new Date(),
+        action: statusChangeMessage,
+        user: req.user._id,
       });
     }
 
@@ -1127,8 +1169,14 @@ exports.sendMessage = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      message: messageData,
+      message: statusChanged
+        ? "Tin nhắn đã được gửi và trạng thái ticket đã được cập nhật"
+        : "Tin nhắn đã được gửi thành công",
+      messageData: messageData,
       ticket: updatedTicket,
+      statusChanged: statusChanged,
+      oldStatus: oldStatus,
+      newStatus: newStatus,
     });
   } catch (error) {
     console.error("Lỗi sendMessage:", error);
