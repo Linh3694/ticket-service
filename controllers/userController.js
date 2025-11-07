@@ -116,13 +116,10 @@ async function getAllFrappeUsers(token) {
         hasMore = false;
       } else {
         // Filter enabled users only (double check)
-        // In Frappe, users are enabled when disabled=0 or disabled=false
+        // In Frappe, only System Users are typically enabled for login
         const enabledUsers = userList.filter(user => {
-          // Check if user is not disabled (disabled=0, "0", false, or undefined/null)
-          const isNotDisabled = user.disabled === 0 || user.disabled === "0" || user.disabled === false || user.disabled === null || user.disabled === undefined;
-          // Also check user_type - only System Users are typically enabled for login
           const isSystemUser = user.user_type === 'System User';
-          return isNotDisabled && isSystemUser;
+          return isSystemUser;
         });
 
         console.log(`   ✅ Filtered ${enabledUsers.length} enabled users from ${userList.length} total users`);
