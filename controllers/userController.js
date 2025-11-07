@@ -209,10 +209,13 @@ async function getAllFrappeUsers(token) {
         ? user.roles.map((r) => (typeof r === 'string' ? r : r?.role)).filter(Boolean)
         : [];
 
+      // Trong Frappe, User.name thường là email, nếu email field không có thì dùng name
+      const userEmail = user.email || user.name || '';
+      
       // Đảm bảo có đủ fields cần thiết cho formatFrappeUser
       return {
         name: user.name,
-        email: user.email,
+        email: userEmail, // Dùng name làm fallback nếu email không có
         full_name: user.full_name || user.name,
         first_name: user.first_name,
         middle_name: user.middle_name,
@@ -265,8 +268,11 @@ function formatFrappeUser(frappeUser) {
     [frappeUser.first_name, frappeUser.middle_name, frappeUser.last_name].filter(Boolean).join(' ') ||
     frappeUser.name;
 
+  // Trong Frappe, User.name thường là email, nếu email field không có thì dùng name
+  const userEmail = frappeUser.email || frappeUser.name || '';
+
   return {
-    email: frappeUser.email,
+    email: userEmail,
     fullname: fullName,
     avatarUrl: frappeUser.user_image || frappeUser.userImage || frappeUser.avatar || frappeUser.avatar_url || '',
     department: frappeUser.department || frappeUser.location || 'Unknown',
@@ -379,9 +385,11 @@ exports.syncUsersManual = async (req, res) => {
     const batches = [];
 
     // Filter out users without email before processing
+    // Trong Frappe, User.name thường là email, nên cần check cả name nếu email không có
     const validUsers = frappeUsers.filter(user => {
-      if (!user.email) {
-        console.warn(`⚠️  [Manual Sync] Skipping user without email: ${user.name || 'Unknown'}`);
+      const userEmail = user.email || user.name || '';
+      if (!userEmail || !userEmail.includes('@')) {
+        console.warn(`⚠️  [Manual Sync] Skipping user without valid email: ${user.name || 'Unknown'}`);
         failed++;
         failedUsers.push({ identifier: user.name || 'Unknown', error: 'Missing email' });
         return false;
@@ -408,9 +416,10 @@ exports.syncUsersManual = async (req, res) => {
       // Process batch parallel với Promise.allSettled
       const batchPromises = batch.map(async (frappeUser) => {
         try {
-          // Validate email one more time
-          if (!frappeUser.email) {
-            throw new Error('Email is required');
+          // Validate email: trong Frappe, name thường là email
+          const userEmail = frappeUser.email || frappeUser.name || '';
+          if (!userEmail || !userEmail.includes('@')) {
+            throw new Error('Email is required and must be valid');
           }
 
           const userData = formatFrappeUser(frappeUser);
@@ -422,19 +431,19 @@ exports.syncUsersManual = async (req, res) => {
 
           // Log để debug avatar update (chỉ log nếu có avatar)
           if (frappeUser.user_image) {
-            console.log(`🖼️  [Sync] Updating avatar for ${frappeUser.email}: ${userData.avatarUrl}`);
+            console.log(`🖼️  [Sync] Updating avatar for ${userEmail}: ${userData.avatarUrl}`);
           }
 
           const result = await User.findOneAndUpdate(
-            { email: frappeUser.email },
+            { email: userEmail },
             userData,
             { upsert: true, new: true, setDefaultsOnInsert: true }
           );
 
-          return { success: true, email: frappeUser.email, roles: result.roles || [] };
+          return { success: true, email: userEmail, roles: result.roles || [] };
         } catch (err) {
-          console.error(`❌ [Manual Sync] Failed to sync ${frappeUser.email || frappeUser.name}: ${err.message}`);
-          return { success: false, email: frappeUser.email || frappeUser.name, error: err.message };
+          console.error(`❌ [Manual Sync] Failed to sync ${frappeUser.email || frappeUser.name || 'Unknown'}: ${err.message}`);
+          return { success: false, email: frappeUser.email || frappeUser.name || 'Unknown', error: err.message };
         }
       });
 
