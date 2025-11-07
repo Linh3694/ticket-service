@@ -489,6 +489,55 @@ exports.getTicketById = async (req, res) => {
   }
 };
 
+// 📋 Lấy lịch sử ticket
+exports.getTicketHistory = async (req, res) => {
+  try {
+    const { ticketId } = req.params;
+
+    console.log(`📋 [getTicketHistory] Fetching history for ticket: ${ticketId}`);
+
+    // Lấy ticket và populate history với thông tin user
+    const ticket = await Ticket.findById(ticketId)
+      .populate({
+        path: 'history.user',
+        model: 'User',
+        select: 'fullname email avatarUrl'
+      })
+      .select('history');
+
+    if (!ticket) {
+      return res.status(404).json({
+        success: false,
+        message: "Ticket không tồn tại"
+      });
+    }
+
+    // Sort history theo thời gian mới nhất trước
+    const sortedHistory = ticket.history
+      .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
+      .map(entry => ({
+        _id: entry._id,
+        timestamp: entry.timestamp,
+        action: entry.action,
+        user: entry.user
+      }));
+
+    console.log(`✅ [getTicketHistory] Found ${sortedHistory.length} history entries for ticket ${ticketId}`);
+
+    return res.status(200).json({
+      success: true,
+      data: sortedHistory
+    });
+
+  } catch (error) {
+    console.error("❌ Error in getTicketHistory:", error);
+    return res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+};
+
 // c) Cập nhật ticket
 exports.updateTicket = async (req, res) => {
   const { ticketId } = req.params;

@@ -25,6 +25,7 @@ router.get("/feedback-stats/:email", ticketController.getTeamMemberFeedbackStats
 
 // Dynamic routes with :ticketId (MUST be last!)
 router.get("/:ticketId", authenticate, ticketController.getTicketById);
+router.get("/:ticketId/history", authenticate, ticketController.getTicketHistory);
 router.put("/:ticketId", authenticate, upload.array("attachments", 15), ticketController.updateTicket);
 router.delete("/:ticketId", authenticate, ticketController.deleteTicket);
 router.post("/:ticketId/feedback", authenticate, ticketController.addFeedback);
