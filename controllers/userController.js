@@ -87,6 +87,8 @@ async function getAllFrappeUsers(token) {
               'job_title', 'designation', 'employee_code', 'microsoft_id',
               'roles', 'docstatus', 'user_type'
             ]),
+            // Thử filter enabled users từ API (nếu API hỗ trợ)
+            filters: JSON.stringify([["User", "enabled", "=", 1]]),
             limit_start: start,
             limit_page_length: pageLength,
             order_by: 'name asc'
@@ -103,6 +105,18 @@ async function getAllFrappeUsers(token) {
       const totalCount = listResponse.data.total_count || listResponse.data.total;
 
       console.log(`📦 Page ${pageCount}: Found ${userList.length} users (limit_start: ${start}, limit_page_length: ${pageLength})`);
+      
+      // Debug: Log API response structure (chỉ log page đầu tiên)
+      if (pageCount === 1) {
+        console.log(`🔍 [Debug] API Response structure:`);
+        console.log(`   - Has data array: ${!!listResponse.data.data}`);
+        console.log(`   - Data length: ${userList.length}`);
+        console.log(`   - Total count: ${totalCount || 'N/A'}`);
+        if (userList.length > 0) {
+          const firstUser = userList[0];
+          console.log(`   - First user keys: ${Object.keys(firstUser).join(', ')}`);
+        }
+      }
 
       // Debug: Check enabled field values in first few users
       if (pageCount <= 3 && userList.length > 0) { // Debug first 3 pages
@@ -120,14 +134,48 @@ async function getAllFrappeUsers(token) {
         console.log(`✅ No more users found, stopping pagination`);
         hasMore = false;
       } else {
-        // Filter enabled users only (double check)
-        // In Frappe, users with docstatus = 0 (active) are typically enabled
+        // Filter enabled users only (flexible logic)
+        // Priority: enabled field > disabled field > docstatus
         const enabledUsers = userList.filter(user => {
-          const isActive = user.docstatus === 0;
-          return isActive;
+          // Check disabled field first (nếu disabled = true thì chắc chắn không enabled)
+          if (user.disabled === true || user.disabled === 1 || user.disabled === "1") {
+            return false;
+          }
+          
+          // Check enabled field (ưu tiên cao nhất)
+          if (user.enabled !== undefined && user.enabled !== null) {
+            const isEnabled = user.enabled === 1 || user.enabled === true || user.enabled === "1";
+            return isEnabled;
+          }
+          
+          // Fallback: check docstatus (0 = active/draft, 1 = submitted, 2 = cancelled)
+          if (user.docstatus !== undefined && user.docstatus !== null) {
+            return user.docstatus === 0; // Only active/draft users
+          }
+          
+          // Nếu không có thông tin nào về status, mặc định là enabled (tránh filter quá strict)
+          // Điều này có thể xảy ra nếu API không trả về các field này
+          return true;
         });
 
         console.log(`   ✅ Filtered ${enabledUsers.length} enabled users from ${userList.length} total users`);
+        
+        // Debug: Log why users were filtered out (chỉ log page đầu tiên)
+        if (pageCount === 1 && enabledUsers.length < userList.length) {
+          const filteredOut = userList.filter(u => !enabledUsers.includes(u));
+          console.log(`   ⚠️  Filtered out ${filteredOut.length} users:`);
+          filteredOut.slice(0, 5).forEach(u => {
+            console.log(`      - ${u.email}: enabled=${u.enabled}, disabled=${u.disabled}, docstatus=${u.docstatus}`);
+          });
+        }
+        
+        // Debug: Log sample of enabled users (chỉ log page đầu tiên)
+        if (pageCount === 1 && enabledUsers.length > 0) {
+          console.log(`   ✅ Sample enabled users:`);
+          enabledUsers.slice(0, 3).forEach(u => {
+            console.log(`      - ${u.email}: enabled=${u.enabled}, disabled=${u.disabled}, docstatus=${u.docstatus}`);
+          });
+        }
 
         allUsers.push(...enabledUsers);
 
