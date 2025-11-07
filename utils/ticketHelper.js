@@ -54,11 +54,8 @@ async function assignTicketToUser(category) {
   try {
     console.log(`🔍 [assignTicket] Finding team member with role: ${category}`);
 
-    // Tìm tất cả team member có role tương ứng
-    const teamMembers = await SupportTeamMember.find({
-      roles: category,
-      isActive: true
-    });
+    // Sử dụng static method getMembersByRole (auto-populates user data)
+    const teamMembers = await SupportTeamMember.getMembersByRole(category);
 
     console.log(`   📋 Query: roles=${category}, isActive=true`);
     console.log(`   ✅ Found ${teamMembers.length} team member(s)`);

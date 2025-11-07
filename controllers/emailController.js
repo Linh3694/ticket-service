@@ -269,9 +269,8 @@ exports.sendNewTicketNotification = async (ticket) => {
 
     console.log("📧 [Email] Gửi thông báo ticket mới cho support team...");
 
-    // Lấy danh sách support team members
-    const supportMembers = await SupportTeamMember.find({ isActive: true })
-      .select('email fullname');
+    // Lấy danh sách support team members (auto-populated với user data)
+    const supportMembers = await SupportTeamMember.getAllMembers();
 
     if (supportMembers.length === 0) {
       console.log("⚠️  [Email] Không có support team members để gửi thông báo");

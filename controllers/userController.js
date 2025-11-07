@@ -1,6 +1,5 @@
 const axios = require('axios');
 const User = require('../models/Users');
-const SupportTeamMember = require('../models/SupportTeamMember');
 
 const FRAPPE_API_URL = process.env.FRAPPE_API_URL || 'https://admin.sis.wellspring.edu.vn';
 
@@ -601,29 +600,9 @@ exports.syncUsersManual = async (req, res) => {
             { upsert: true, new: true, setDefaultsOnInsert: true }
           );
 
-          // Cập nhật SupportTeamMember nếu user này là member của support team
-          try {
-            // Force update avatarUrl, fullname, department bằng findOneAndUpdate với $set
-            // Điều này đảm bảo fields được update ngay cả khi giá trị không thay đổi
-            const updatedMember = await SupportTeamMember.findOneAndUpdate(
-              { email: userEmail },
-              { 
-                $set: {
-                  avatarUrl: userData.avatarUrl || '',
-                  fullname: userData.fullname,
-                  department: userData.department || ''
-                }
-              },
-              { new: true }
-            );
-            
-            if (updatedMember && avatarDebugCount <= 5 && userData.avatarUrl) {
-              console.log(`🔄 [Sync] Updated SupportTeamMember avatar for ${userEmail}: "${userData.avatarUrl}"`);
-            }
-          } catch (supportTeamErr) {
-            // Log nhưng không fail sync nếu update SupportTeamMember lỗi
-            console.warn(`⚠️  [Sync] Failed to update SupportTeamMember for ${userEmail}: ${supportTeamErr.message}`);
-          }
+          // ✅ SupportTeamMember KHÔNG cần sync riêng nữa
+          // User data sẽ được auto-populated khi query SupportTeamMember
+          // (xem SupportTeamMember.populateUserData() method)
 
           return { 
             success: true, 

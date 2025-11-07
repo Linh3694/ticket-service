@@ -19,10 +19,8 @@ const User = require("../models/Users");
 async function getTechnicalUsers(token = null) {
   try {
     // For email tickets, prioritize users with "Email Ticket" role
-    const emailTicketMembers = await SupportTeamMember.find({
-      isActive: true,
-      roles: { $in: ['Email Ticket'] }
-    }).populate('userId').lean();
+    // Query với filter roles (sẽ auto-populate user data)
+    const emailTicketMembers = await SupportTeamMember.getAllMembers({ roles: 'Email Ticket' });
 
     if (emailTicketMembers.length > 0) {
       // Sort by ticket count (least assigned first)
@@ -38,17 +36,17 @@ async function getTechnicalUsers(token = null) {
       return sortedMembers.map(member => ({
         _id: member._id,
         email: member.email,
-        fullname: member.fullname,
-        name: member.userId?.name || member.fullname,
-        disabled: member.userId?.disabled || false
+        fullname: member.fullname, // Already populated from Users
+        name: member.fullname,
+        disabled: false // Members are always active
       }));
     }
 
     // Fallback: get from SupportTeamMember collection (other technical roles)
-    const supportMembers = await SupportTeamMember.find({
-      isActive: true,
-      roles: { $in: ['Overall', 'Software', 'Network', 'Camera System', 'Bell System'] }
-    }).populate('userId').lean();
+    const allMembers = await SupportTeamMember.getAllMembers();
+    const supportMembers = allMembers.filter(m => 
+      m.roles && m.roles.some(r => ['Overall', 'Software', 'Network System', 'Camera System', 'Bell System'].includes(r))
+    );
 
     if (supportMembers.length > 0) {
       // Sort by ticket count (least assigned first)
@@ -64,9 +62,9 @@ async function getTechnicalUsers(token = null) {
       return sortedMembers.map(member => ({
         _id: member._id,
         email: member.email,
-        fullname: member.fullname,
-        name: member.userId?.name || member.fullname,
-        disabled: member.userId?.disabled || false
+        fullname: member.fullname, // Already populated from Users
+        name: member.fullname,
+        disabled: false // Members are always active
       }));
     }
 
@@ -456,8 +454,13 @@ exports.createTicket = async (req, res) => {
     if (assignedToId) {
       // Get assigned user info for history log
       const SupportTeamMember = require('../models/SupportTeamMember');
-      const assignedMember = await SupportTeamMember.findById(assignedToId).select('fullname');
-      const assignedName = assignedMember?.fullname || 'Unknown';
+      const assignedMemberDoc = await SupportTeamMember.findById(assignedToId).lean();
+      let assignedName = 'Unknown';
+      if (assignedMemberDoc) {
+        // Populate user data để lấy fullname
+        const populated = await SupportTeamMember.populateUserData([assignedMemberDoc]);
+        assignedName = populated[0]?.fullname || 'Unknown';
+      }
       console.log(`📝 [createTicket] Assigned name: "${assignedName}"`);
 
       // Log auto assignment
@@ -479,10 +482,10 @@ exports.createTicket = async (req, res) => {
     console.log(`🔧 [createTicket] Before populate - assignedTo: ${newTicket.assignedTo}`);
     
     if (newTicket.assignedTo) {
-      // Check if assignedTo user exists in SupportTeamMember
+      // Check if assignedTo user exists in SupportTeamMember (debug log only)
       const SupportTeamMember = require('../models/SupportTeamMember');
-      const member = await SupportTeamMember.findById(newTicket.assignedTo);
-      console.log(`🔧 [createTicket] assignedTo user exists: ${member ? 'YES' : 'NO'}`);
+      const memberExists = await SupportTeamMember.exists({ _id: newTicket.assignedTo, isActive: true });
+      console.log(`🔧 [createTicket] assignedTo user exists in SupportTeamMember: ${memberExists ? 'YES' : 'NO'}`);
     }
     
     await newTicket.populate('creator assignedTo', 'fullname email avatarUrl');
@@ -1074,8 +1077,9 @@ exports.sendMessage = async (req, res) => {
     }
 
     // Kiểm tra xem người gửi có phải là support team member không
+    const userEmail = req.user.email || req.user.userId;
     const isSupportTeamMember = await SupportTeamMember.findOne({
-      userId: req.user.email || req.user.userId,
+      email: userEmail,
       isActive: true
     });
 

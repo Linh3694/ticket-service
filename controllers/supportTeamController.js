@@ -100,16 +100,17 @@ exports.getAllTeamMembers = async (req, res) => {
     console.log('🔍 [getAllTeamMembers] Starting query...');
     console.log('   Query params - role:', role, 'search:', search);
     
-    let query = { isActive: true };
+    let filters = {};
     
     // Filter by role if specified
     if (role) {
-      query.roles = role;
+      filters.roles = role;
     }
     
-    console.log('📋 [getAllTeamMembers] MongoDB query:', JSON.stringify(query));
+    console.log('📋 [getAllTeamMembers] Filters:', JSON.stringify(filters));
     
-    let members = await SupportTeamMember.find(query).sort({ fullname: 1 });
+    // Use getAllMembers static method (auto-populates user data)
+    let members = await SupportTeamMember.getAllMembers(filters);
     
     console.log(`✅ [getAllTeamMembers] Found ${members.length} members from DB`);
     console.log(`📝 [getAllTeamMembers] Member sample:`, members[0] ? JSON.stringify(members[0], null, 2) : 'NONE');
@@ -118,9 +119,8 @@ exports.getAllTeamMembers = async (req, res) => {
     if (search) {
       const searchLower = search.toLowerCase();
       members = members.filter(member => 
-        member.fullname.toLowerCase().includes(searchLower) ||
-        member.email.toLowerCase().includes(searchLower) ||
-        member.userId.toLowerCase().includes(searchLower)
+        (member.fullname && member.fullname.toLowerCase().includes(searchLower)) ||
+        (member.email && member.email.toLowerCase().includes(searchLower))
       );
       console.log(`🔎 [getAllTeamMembers] After search filter: ${members.length} members`);
     }
@@ -342,13 +342,13 @@ exports.debugFrappeUsers = async (req, res) => {
 // Tạo hoặc cập nhật team member
 exports.createOrUpdateTeamMember = async (req, res) => {
   try {
-    const { userId, fullname, email, avatarUrl, department, roles, notes } = req.body;
+    const { email, roles, notes } = req.body;
     
     // Validate required fields
-    if (!userId || !fullname || !email) {
+    if (!email) {
       return res.status(400).json({ 
         success: false, 
-        message: 'userId, fullname, and email are required' 
+        message: 'email is required' 
       });
     }
     
@@ -364,12 +364,9 @@ exports.createOrUpdateTeamMember = async (req, res) => {
       }
     }
     
+    // createOrUpdate sẽ auto-populate fullname, avatarUrl, department từ Users collection
     const member = await SupportTeamMember.createOrUpdate({
-      userId,
-      fullname,
       email,
-      avatarUrl,
-      department,
       roles: roles || [],
       notes
     });
@@ -411,21 +408,28 @@ exports.updateTeamMemberRoles = async (req, res) => {
       });
     }
     
-    const member = await SupportTeamMember.getMemberByUserId(userId);
+    // Find member document (not populated, để có thể save)
+    const memberDoc = await SupportTeamMember.findOne({ 
+      $or: [{ userId }, { email: userId }],
+      isActive: true 
+    });
     
-    if (!member) {
+    if (!memberDoc) {
       return res.status(404).json({ 
         success: false, 
         message: 'Team member not found' 
       });
     }
     
-    member.roles = roles;
-    await member.save();
+    memberDoc.roles = roles;
+    await memberDoc.save();
+    
+    // Populate data để return
+    const populatedMember = await SupportTeamMember.populateUserData([memberDoc]);
     
     res.status(200).json({ 
       success: true,
-      data: { member },
+      data: { member: populatedMember[0] },
       message: 'Roles updated successfully'
     });
   } catch (error) {
@@ -527,24 +531,31 @@ exports.updateMemberStats = async (req, res) => {
     const { userId } = req.params;
     const { totalTickets, resolvedTickets, averageRating } = req.body;
     
-    const member = await SupportTeamMember.getMemberByUserId(userId);
+    // Find member document (not populated, để có thể save)
+    const memberDoc = await SupportTeamMember.findOne({ 
+      $or: [{ userId }, { email: userId }],
+      isActive: true 
+    });
     
-    if (!member) {
+    if (!memberDoc) {
       return res.status(404).json({ 
         success: false, 
         message: 'Team member not found' 
       });
     }
     
-    await member.updateStats({
+    await memberDoc.updateStats({
       totalTickets,
       resolvedTickets,
       averageRating
     });
     
+    // Populate data để return
+    const populatedMember = await SupportTeamMember.populateUserData([memberDoc]);
+    
     res.status(200).json({ 
       success: true,
-      data: { member },
+      data: { member: populatedMember[0] },
       message: 'Stats updated successfully'
     });
   } catch (error) {

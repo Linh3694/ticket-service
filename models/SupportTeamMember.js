@@ -12,33 +12,21 @@ const SUPPORT_ROLES = [
 ];
 
 const supportTeamMemberSchema = new mongoose.Schema({
-  userId: {
+  // Reference đến Users collection (email là unique identifier)
+  email: {
     type: String,
     required: true,
     unique: true,
     index: true
   },
-    fullname: {
+  
+  // DEPRECATED: Giữ lại để tương thích, nhưng không dùng nữa
+  userId: {
     type: String,
-    required: true
+    index: true
   },
   
-  email: {
-    type: String,
-    required: true
-  },
-  
-  avatarUrl: {
-    type: String,
-    default: ''
-  },
-  
-  department: {
-    type: String,
-    default: ''
-  },
-  
-  // Các role/category mà member phụ trách
+  // Các role/category mà member phụ trách (SUPPORT roles, khác với Frappe roles)
   roles: [{
     type: String,
     enum: SUPPORT_ROLES
@@ -76,34 +64,93 @@ const supportTeamMemberSchema = new mongoose.Schema({
 });
 
 // Indexes
-supportTeamMemberSchema.index({ userId: 1, isActive: 1 });
+supportTeamMemberSchema.index({ email: 1, isActive: 1 });
 supportTeamMemberSchema.index({ roles: 1 });
 supportTeamMemberSchema.index({ 'stats.totalTickets': -1 });
 
 // Static methods
 
-// Lấy tất cả members
+// Helper: Populate user data từ Users collection
+supportTeamMemberSchema.statics.populateUserData = async function(members) {
+  const User = mongoose.model('User');
+  
+  if (!Array.isArray(members)) {
+    members = [members];
+  }
+  
+  const emails = members.map(m => m.email).filter(Boolean);
+  const users = await User.find({ email: { $in: emails } })
+    .select('email fullname avatarUrl department jobTitle')
+    .lean();
+  
+  const userMap = new Map(users.map(u => [u.email, u]));
+  
+  return members.map(member => {
+    const memberObj = member.toObject ? member.toObject() : member;
+    const user = userMap.get(memberObj.email);
+    
+    return {
+      ...memberObj,
+      // Populate từ Users collection
+      fullname: user?.fullname || memberObj.email,
+      avatarUrl: user?.avatarUrl || '',
+      department: user?.department || '',
+      jobTitle: user?.jobTitle || 'User'
+    };
+  });
+};
+
+// Lấy tất cả members (with user data populated)
 supportTeamMemberSchema.statics.getAllMembers = async function(filters = {}) {
   const query = { isActive: true, ...filters };
-  return await this.find(query).sort({ fullname: 1 });
+  const members = await this.find(query).lean();
+  return await this.populateUserData(members);
 };
 
-// Lấy member theo userId
+// Lấy member theo email
+supportTeamMemberSchema.statics.getMemberByEmail = async function(email) {
+  const member = await this.findOne({ email, isActive: true }).lean();
+  if (!member) return null;
+  
+  const populated = await this.populateUserData([member]);
+  return populated[0];
+};
+
+// DEPRECATED: Giữ lại để backward compatibility
 supportTeamMemberSchema.statics.getMemberByUserId = async function(userId) {
-  return await this.findOne({ userId, isActive: true });
+  const member = await this.findOne({ 
+    $or: [{ userId }, { email: userId }],
+    isActive: true 
+  }).lean();
+  if (!member) return null;
+  
+  const populated = await this.populateUserData([member]);
+  return populated[0];
 };
 
-// Lấy members theo role
+// Lấy members theo role (with user data populated)
 supportTeamMemberSchema.statics.getMembersByRole = async function(role) {
-  return await this.find({ 
+  const members = await this.find({ 
     roles: role, 
     isActive: true 
-  }).sort({ fullname: 1 });
+  }).lean();
+  return await this.populateUserData(members);
 };
 
 // Tạo hoặc cập nhật member
 supportTeamMemberSchema.statics.createOrUpdate = async function(memberData) {
-  const { userId, fullname, email, avatarUrl, department, roles, notes } = memberData;
+  const { email, roles, notes, userId } = memberData;
+  
+  if (!email) {
+    throw new Error('Email is required');
+  }
+  
+  // Validate user exists trong Users collection
+  const User = mongoose.model('User');
+  const user = await User.findOne({ email }).select('email fullname');
+  if (!user) {
+    throw new Error(`User not found in Users collection: ${email}`);
+  }
   
   // Validate roles
   if (roles && roles.length > 0) {
@@ -113,41 +160,42 @@ supportTeamMemberSchema.statics.createOrUpdate = async function(memberData) {
     }
   }
   
-  const existingMember = await this.findOne({ userId });
+  const existingMember = await this.findOne({ email });
   
   if (existingMember) {
     // Update existing member
-    existingMember.fullname = fullname;
-    existingMember.email = email;
-    existingMember.avatarUrl = avatarUrl || existingMember.avatarUrl;
-    existingMember.department = department || existingMember.department;
     existingMember.roles = roles || existingMember.roles;
     existingMember.notes = notes !== undefined ? notes : existingMember.notes;
     existingMember.isActive = true;
     
     await existingMember.save();
-    return existingMember;
+    
+    // Populate and return
+    const populated = await this.populateUserData([existingMember]);
+    return populated[0];
   } else {
     // Create new member
     const newMember = new this({
-      userId,
-      fullname,
       email,
-      avatarUrl: avatarUrl || '',
-      department: department || '',
+      userId: userId || email, // Backward compatibility
       roles: roles || [],
       notes: notes || '',
       isActive: true
     });
     
     await newMember.save();
-    return newMember;
+    
+    // Populate and return
+    const populated = await this.populateUserData([newMember]);
+    return populated[0];
   }
 };
 
 // Xóa member (soft delete)
-supportTeamMemberSchema.statics.removeMember = async function(userId) {
-  const member = await this.findOne({ userId });
+supportTeamMemberSchema.statics.removeMember = async function(emailOrUserId) {
+  const member = await this.findOne({ 
+    $or: [{ email: emailOrUserId }, { userId: emailOrUserId }]
+  });
   
   if (!member) {
     throw new Error('Member not found');
