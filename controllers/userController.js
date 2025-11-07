@@ -383,6 +383,7 @@ exports.syncUsersManual = async (req, res) => {
     const failedUsers = []; // Track failed users for debugging
     const batchSize = 10; // Process 10 users at a time
     const batches = [];
+    let avatarDebugCount = 0; // Counter để chỉ log một vài avatars đầu tiên
 
     // Filter out users without email before processing
     // Trong Frappe, User.name thường là email, nên cần check cả name nếu email không có
@@ -429,14 +430,24 @@ exports.syncUsersManual = async (req, res) => {
             throw new Error(`Invalid user data: missing email or fullname`);
           }
 
-          // Log để debug avatar update (chỉ log nếu có avatar)
-          if (frappeUser.user_image) {
-            console.log(`🖼️  [Sync] Updating avatar for ${userEmail}: ${userData.avatarUrl}`);
+          // Log để debug avatar update (chỉ log 5 users đầu tiên có avatar)
+          if (frappeUser.user_image && avatarDebugCount < 5) {
+            avatarDebugCount++;
+            const existingUser = await User.findOne({ email: userEmail }).select('avatarUrl');
+            const oldAvatar = existingUser?.avatarUrl || '';
+            const newAvatar = userData.avatarUrl || '';
+            if (oldAvatar !== newAvatar) {
+              console.log(`🖼️  [Sync] Avatar changed for ${userEmail}: "${oldAvatar}" → "${newAvatar}"`);
+            } else if (newAvatar) {
+              console.log(`🖼️  [Sync] Avatar unchanged for ${userEmail}: "${newAvatar}"`);
+            }
           }
 
+          // Sử dụng $set để đảm bảo tất cả fields được update, kể cả avatarUrl
+          // Điều này đảm bảo avatarUrl luôn được cập nhật ngay cả khi giá trị không thay đổi
           const result = await User.findOneAndUpdate(
             { email: userEmail },
-            userData,
+            { $set: userData },
             { upsert: true, new: true, setDefaultsOnInsert: true }
           );
 
