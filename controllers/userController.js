@@ -495,23 +495,20 @@ exports.syncAllUsers = async (req, res) => {
 };
 */
 
-// ✅ ENDPOINT 2: Manual sync all enabled users (batch processing)
+// ✅ ENDPOINT 2: Manual sync all enabled users (simplified & optimized)
 exports.syncUsersManual = async (req, res) => {
   try {
     const token = req.header('Authorization')?.replace('Bearer ', '');
-
     if (!token) {
-      return res.status(401).json({
-        success: false,
-        message: 'Token required'
-      });
+      return res.status(401).json({ success: false, message: 'Token required' });
     }
 
-    console.log('📝 [Manual Sync] Starting batch sync for enabled users only...');
+    console.log('🔄 [Sync] Starting user sync...');
     const startTime = Date.now();
 
+    // Fetch enabled users from Frappe
     const frappeUsers = await getAllFrappeUsers(token);
-    console.log(`📊 [Manual Sync] Found ${frappeUsers.length} enabled users to sync`);
+    console.log(`📊 [Sync] Found ${frappeUsers.length} enabled users from Frappe`);
 
     if (frappeUsers.length === 0) {
       return res.status(200).json({
@@ -521,211 +518,81 @@ exports.syncUsersManual = async (req, res) => {
       });
     }
 
+    // Filter valid users (must have email)
+    const validUsers = frappeUsers.filter(user => {
+      const email = user.email || user.name || '';
+      return email && email.includes('@');
+    });
+    
+    const skipped = frappeUsers.length - validUsers.length;
+    if (skipped > 0) {
+      console.log(`⚠️  [Sync] Skipped ${skipped} users without valid email`);
+    }
+
+    // Batch process users (20 at a time for better performance)
+    const batchSize = 20;
     let synced = 0;
     let failed = 0;
-    const failedUsers = []; // Track failed users for debugging
-    const syncedUsers = []; // Track synced users
-    const userTypeStats = {
-      'System User': 0,
-      'Website User': 0,
-      'Other': 0
-    };
-    const batchSize = 10; // Process 10 users at a time
-    const batches = [];
-    let avatarDebugCount = 0; // Counter để chỉ log một vài avatars đầu tiên
+    const userTypeStats = { 'System User': 0, 'Website User': 0, 'Other': 0 };
 
-    // Filter out users without email before processing
-    // Trong Frappe, User.name thường là email, nên cần check cả name nếu email không có
-    const validUsers = frappeUsers.filter(user => {
-      const userEmail = user.email || user.name || '';
-      if (!userEmail || !userEmail.includes('@')) {
-        console.warn(`⚠️  [Manual Sync] Skipping user without valid email: ${user.name || 'Unknown'}`);
-        failed++;
-        failedUsers.push({ identifier: user.name || 'Unknown', error: 'Missing email' });
-        return false;
-      }
-      return true;
-    });
-
-    console.log(`✅ [Manual Sync] ${validUsers.length} valid users (${frappeUsers.length - validUsers.length} skipped due to missing email)`);
-
-    // Chia thành các batch
     for (let i = 0; i < validUsers.length; i += batchSize) {
-      batches.push(validUsers.slice(i, i + batchSize));
-    }
-
-    console.log(`🔄 [Manual Sync] Processing ${batches.length} batches of ${batchSize} users each...`);
-
-    // Process từng batch
-    for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
-      const batch = batches[batchIndex];
-      const batchStartTime = Date.now();
-
-      console.log(`📦 [Manual Sync] Processing batch ${batchIndex + 1}/${batches.length} (${batch.length} users)...`);
-
-      // Process batch parallel với Promise.allSettled
-      const batchPromises = batch.map(async (frappeUser) => {
-        try {
-          // Validate email: trong Frappe, name thường là email
-          const userEmail = frappeUser.email || frappeUser.name || '';
-          if (!userEmail || !userEmail.includes('@')) {
-            throw new Error('Email is required and must be valid');
-          }
-
+      const batch = validUsers.slice(i, i + batchSize);
+      const batchResults = await Promise.allSettled(
+        batch.map(async (frappeUser) => {
+          const userEmail = frappeUser.email || frappeUser.name;
           const userData = formatFrappeUser(frappeUser);
-
-          // Validate formatted user data
-          if (!userData.email || !userData.fullname) {
-            throw new Error(`Invalid user data: missing email or fullname`);
-          }
-
-          // Log để debug avatar update (chỉ log 5 users đầu tiên có avatar)
-          if (frappeUser.user_image && avatarDebugCount < 5) {
-            avatarDebugCount++;
-            const existingUser = await User.findOne({ email: userEmail }).select('avatarUrl');
-            const oldAvatar = existingUser?.avatarUrl || '';
-            const newAvatar = userData.avatarUrl || '';
-            if (oldAvatar !== newAvatar) {
-              console.log(`🖼️  [Sync] Avatar changed for ${userEmail}: "${oldAvatar}" → "${newAvatar}"`);
-            } else if (newAvatar) {
-              console.log(`🖼️  [Sync] Avatar unchanged for ${userEmail}: "${newAvatar}"`);
-            }
-          }
-
-          // Sử dụng $set để đảm bảo tất cả fields được update, kể cả avatarUrl
-          // Điều này đảm bảo avatarUrl luôn được cập nhật ngay cả khi giá trị không thay đổi
-          const result = await User.findOneAndUpdate(
+          
+          await User.findOneAndUpdate(
             { email: userEmail },
             { $set: userData },
-            { upsert: true, new: true, setDefaultsOnInsert: true }
+            { upsert: true, new: true }
           );
-
-          // ✅ SupportTeamMember KHÔNG cần sync riêng nữa
-          // User data sẽ được auto-populated khi query SupportTeamMember
-          // (xem SupportTeamMember.populateUserData() method)
-
+          
           return { 
-            success: true, 
             email: userEmail, 
-            roles: result.roles || [],
-            userType: frappeUser.user_type || 'Unknown',
-            fullname: userData.fullname
+            userType: frappeUser.user_type || 'Unknown'
           };
-        } catch (err) {
-          console.error(`❌ [Manual Sync] Failed to sync ${frappeUser.email || frappeUser.name || 'Unknown'}: ${err.message}`);
-          return { success: false, email: frappeUser.email || frappeUser.name || 'Unknown', error: err.message };
-        }
-      });
+        })
+      );
 
-      const batchResults = await Promise.allSettled(batchPromises);
-
-      // Count results và collect failed users
+      // Count results
       batchResults.forEach(result => {
         if (result.status === 'fulfilled') {
-          if (result.value.success) {
-            synced++;
-            // Track synced user
-            syncedUsers.push({
-              email: result.value.email,
-              fullname: result.value.fullname,
-              userType: result.value.userType,
-              roles: result.value.roles || []
-            });
-            // Count by user type
-            const userType = result.value.userType || 'Other';
-            if (userTypeStats.hasOwnProperty(userType)) {
-              userTypeStats[userType]++;
-            } else {
-              userTypeStats['Other']++;
-            }
-          } else {
-            failed++;
-            failedUsers.push({
-              email: result.value.email,
-              error: result.value.error
-            });
-          }
+          synced++;
+          const userType = result.value.userType;
+          userTypeStats[userType] = (userTypeStats[userType] || 0) + 1;
         } else {
-          // Promise rejected
           failed++;
-          failedUsers.push({
-            email: 'Unknown',
-            error: result.reason?.message || 'Unknown error'
-          });
         }
       });
 
-      const batchDuration = ((Date.now() - batchStartTime) / 1000).toFixed(2);
-      console.log(`✅ [Manual Sync] Batch ${batchIndex + 1} completed in ${batchDuration}s (${synced} synced, ${failed} failed so far)`);
-
-      // Progress logging mỗi 50 users
-      const totalProcessed = synced + failed;
-      if (totalProcessed % 50 === 0 || batchIndex === batches.length - 1) {
-        const progress = ((totalProcessed / validUsers.length) * 100).toFixed(1);
-        const elapsed = ((Date.now() - startTime) / 1000).toFixed(2);
-        console.log(`📊 [Manual Sync] Progress: ${totalProcessed}/${validUsers.length} users (${progress}%) in ${elapsed}s`);
+      // Progress log every 100 users
+      if ((i + batchSize) % 100 === 0 || i + batchSize >= validUsers.length) {
+        const progress = Math.round(((synced + failed) / validUsers.length) * 100);
+        console.log(`📊 [Sync] Progress: ${synced + failed}/${validUsers.length} (${progress}%)`);
       }
     }
 
-    const totalDuration = ((Date.now() - startTime) / 1000).toFixed(2);
-    console.log(`✅ [Manual Sync] Complete: ${synced} synced, ${failed} failed in ${totalDuration}s`);
-    console.log(`📊 [Manual Sync] User type breakdown:`);
-    console.log(`   - System Users: ${userTypeStats['System User']}`);
-    console.log(`   - Website Users: ${userTypeStats['Website User']}`);
-    console.log(`   - Other: ${userTypeStats['Other']}`);
+    const duration = ((Date.now() - startTime) / 1000).toFixed(1);
+    console.log(`✅ [Sync] Complete: ${synced} synced, ${failed} failed in ${duration}s`);
 
-    // Check query parameter để xem có muốn trả về full list không
-    const includeList = req.query.include_list === 'true' || req.query.include_list === '1';
-    const listLimit = parseInt(req.query.list_limit) || 100; // Default limit 100 users
-
-    const response = {
+    res.status(200).json({
       success: true,
-      message: `Manual sync completed for ${frappeUsers.length} enabled users`,
+      message: `Synced ${synced} users successfully`,
       stats: { 
         synced, 
         failed, 
+        skipped,
         total: frappeUsers.length,
-        valid_users: validUsers.length,
-        skipped: frappeUsers.length - validUsers.length,
         user_type_breakdown: userTypeStats
       },
-      duration_seconds: parseFloat(totalDuration)
-    };
-
-    // Include synced users list nếu được yêu cầu
-    if (includeList) {
-      if (syncedUsers.length <= listLimit) {
-        response.synced_users = syncedUsers;
-      } else {
-        response.synced_users = syncedUsers.slice(0, listLimit);
-        response.synced_users_total = syncedUsers.length;
-        response.synced_users_note = `Showing first ${listLimit} of ${syncedUsers.length} synced users. Use ?include_list=true&list_limit=<number> to get more.`;
-      }
-    } else {
-      // Mặc định chỉ trả về sample 10 users đầu tiên
-      response.synced_users_sample = syncedUsers.slice(0, 10);
-      response.synced_users_total = syncedUsers.length;
-      response.synced_users_note = `Showing sample of 10 users. Add ?include_list=true to get full list, or ?include_list=true&list_limit=<number> for custom limit.`;
-    }
-
-    // Include failed users in response if any (for debugging)
-    if (failedUsers.length > 0 && failedUsers.length <= 20) {
-      response.failed_users = failedUsers.slice(0, 20); // Limit to first 20 failed users
-    } else if (failedUsers.length > 20) {
-      response.failed_users_count = failedUsers.length;
-      response.failed_users_sample = failedUsers.slice(0, 10); // Show sample of 10
-    }
-
-    res.status(200).json(response);
+      duration_seconds: parseFloat(duration)
+    });
   } catch (error) {
-    console.error('❌ [Manual Sync] Error:', error.message);
-    if (error.stack) {
-      console.error('Stack trace:', error.stack);
-    }
+    console.error('❌ [Sync] Error:', error.message);
     res.status(500).json({
       success: false,
-      message: error.message,
-      error: process.env.NODE_ENV === 'development' ? error.stack : undefined
+      message: error.message
     });
   }
 };

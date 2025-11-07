@@ -1,19 +1,17 @@
 #!/usr/bin/env node
 
 /**
- * 🔄 Manual Sync Enabled Users Script
- * Usage: node sync-all-users.js <TOKEN> [TICKET_SERVICE_URL] [OPTIONS]
- *
- * Options:
- *   --include-list        Include full list of synced users (default: sample only)
- *   --list-limit=<number> Limit number of users in list (default: 100)
- *
- * This script syncs only ENABLED users from Frappe for better performance.
- *
+ * 🔄 Sync Users from Frappe
+ * 
+ * Syncs all enabled users from Frappe to ticket-service Users collection.
+ * After refactor: No longer needs to sync SupportTeamMember (auto-populated from Users).
+ * 
+ * Usage: 
+ *   node sync-all-users.js <TOKEN> [BASE_URL]
+ * 
  * Example:
  *   node sync-all-users.js eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
- *   node sync-all-users.js <TOKEN> https://admin.sis.wellspring.edu.vn --include-list
- *   node sync-all-users.js <TOKEN> https://admin.sis.wellspring.edu.vn --include-list --list-limit=500
+ *   node sync-all-users.js <TOKEN> https://admin.sis.wellspring.edu.vn
  */
 
 const axios = require('axios');
@@ -22,45 +20,24 @@ const args = process.argv.slice(2);
 const token = args[0];
 const baseURL = args[1] || 'https://admin.sis.wellspring.edu.vn';
 
-// Parse options
-const includeList = args.includes('--include-list');
-const listLimitArg = args.find(arg => arg.startsWith('--list-limit='));
-const listLimit = listLimitArg ? parseInt(listLimitArg.split('=')[1]) : undefined;
-
 if (!token) {
   console.error('❌ Error: Token required');
-  console.error('Usage: node sync-all-users.js <TOKEN> [TICKET_SERVICE_URL] [OPTIONS]');
-  console.error('');
-  console.error('Options:');
-  console.error('  --include-list        Include full list of synced users');
-  console.error('  --list-limit=<number> Limit number of users in list');
+  console.error('Usage: node sync-all-users.js <TOKEN> [BASE_URL]');
   console.error('');
   console.error('Example:');
   console.error('  node sync-all-users.js eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...');
-  console.error('  node sync-all-users.js <TOKEN> https://admin.sis.wellspring.edu.vn --include-list');
-  console.error('  node sync-all-users.js <TOKEN> https://admin.sis.wellspring.edu.vn --include-list --list-limit=500');
   process.exit(1);
 }
 
 const syncAllUsers = async () => {
   try {
-    // Build URL with query parameters
-    let url = `${baseURL}/api/ticket/user/sync/manual`;
-    const params = [];
-    if (includeList) {
-      params.push('include_list=true');
-    }
-    if (listLimit) {
-      params.push(`list_limit=${listLimit}`);
-    }
-    if (params.length > 0) {
-      url += '?' + params.join('&');
-    }
+    const url = `${baseURL}/api/ticket/user/sync/manual`;
     
-    console.log('🔄 Starting Enabled User Sync...');
-    console.log(`URL: ${url} (enabled users only)`);
+    console.log('🔄 Starting user sync...');
+    console.log(`📍 Target: ${baseURL}`);
     console.log('');
     
+    const startTime = Date.now();
     const response = await axios.post(url, {}, {
       headers: {
         'Authorization': `Bearer ${token}`,
@@ -69,58 +46,42 @@ const syncAllUsers = async () => {
     });
     
     const data = response.data;
-    
-    console.log('Response:');
-    console.log(JSON.stringify(data, null, 2));
-    console.log('');
+    const duration = ((Date.now() - startTime) / 1000).toFixed(1);
     
     if (data.success) {
       console.log('✅ Sync completed successfully!');
+      console.log('');
+      console.log('📊 Statistics:');
+      console.log(`   ✅ Synced:   ${data.stats.synced}`);
+      console.log(`   ❌ Failed:   ${data.stats.failed}`);
+      console.log(`   ⏭️  Skipped:  ${data.stats.skipped || 0}`);
+      console.log(`   📋 Total:    ${data.stats.total}`);
+      console.log(`   ⏱️  Duration: ${duration}s`);
       
-      if (data.stats) {
-        const { synced, failed, total, user_type_breakdown } = data.stats;
-        console.log(`📊 Stats:`);
-        console.log(`   ✅ Synced: ${synced}`);
-        console.log(`   ❌ Failed: ${failed}`);
-        console.log(`   📋 Total:  ${total}`);
-        
-        if (user_type_breakdown) {
-          console.log('');
-          console.log(`📊 User Type Breakdown:`);
-          console.log(`   - System Users: ${user_type_breakdown['System User'] || 0}`);
-          console.log(`   - Website Users: ${user_type_breakdown['Website User'] || 0}`);
-          console.log(`   - Other: ${user_type_breakdown['Other'] || 0}`);
-        }
-      }
-      
-      // Show synced users list
-      const usersList = data.synced_users || data.synced_users_sample || [];
-      if (usersList.length > 0) {
+      if (data.stats.user_type_breakdown) {
         console.log('');
-        console.log(`📝 Synced Users (${data.synced_users_total || usersList.length} total):`);
-        usersList.forEach((user, idx) => {
-          console.log(`   ${idx + 1}. ${user.fullname || user.email} (${user.email}) [${user.userType || 'Unknown'}]`);
-          if (user.roles && user.roles.length > 0) {
-            console.log(`      Roles: ${user.roles.join(', ')}`);
-          }
-        });
-        
-        if (data.synced_users_note) {
-          console.log('');
-          console.log(`ℹ️  ${data.synced_users_note}`);
-        }
+        console.log('📊 User Types:');
+        console.log(`   - System Users:  ${data.stats.user_type_breakdown['System User'] || 0}`);
+        console.log(`   - Website Users: ${data.stats.user_type_breakdown['Website User'] || 0}`);
+        console.log(`   - Other:         ${data.stats.user_type_breakdown['Other'] || 0}`);
       }
+      
+      console.log('');
+      console.log('💡 Note: SupportTeamMember data is now auto-populated from Users collection.');
     } else {
-      console.log(`❌ Sync failed: ${data.message}`);
+      console.error(`❌ Sync failed: ${data.message}`);
       process.exit(1);
     }
   } catch (error) {
-    console.error('❌ Error:');
+    console.error('❌ Sync failed!');
+    console.error('');
     if (error.response) {
-      console.error(`Status: ${error.response.status}`);
-      console.error(`Data: ${JSON.stringify(error.response.data, null, 2)}`);
+      console.error(`HTTP ${error.response.status}: ${error.response.statusText}`);
+      if (error.response.data?.message) {
+        console.error(`Error: ${error.response.data.message}`);
+      }
     } else {
-      console.error(error.message);
+      console.error(`Error: ${error.message}`);
     }
     process.exit(1);
   }
