@@ -1,6 +1,7 @@
 const Ticket = require("../models/Ticket");
 const SupportTeam = require("../models/SupportTeam");
 const notificationService = require('../services/notificationService');
+const { TICKET_LOGS, SUBTASK_LOGS, FEEDBACK_LOGS, OTHER_LOGS } = require('../utils/logFormatter');
 const mongoose = require("mongoose");
 const axios = require('axios');
 const fs = require('fs');
@@ -287,11 +288,13 @@ exports.createTicket = async (req, res) => {
     console.log(`   newTicket.assignedTo: ${newTicket.assignedTo}`);
 
     // 4️⃣ Log history
-    const creatorName = reverseName(req.user.fullname || req.user.email);
+    const creatorName = req.user.fullname || req.user.email;
     console.log(`📝 [createTicket] Creator name: "${creatorName}"`);
+
+    // Log ticket creation
     await logTicketHistory(
       newTicket._id,
-      `Ticket created by <strong>${creatorName}</strong>`,
+      TICKET_LOGS.TICKET_CREATED(creatorName),
       userId
     );
 
@@ -299,12 +302,13 @@ exports.createTicket = async (req, res) => {
       // Get assigned user info for history log
       const SupportTeamMember = require('../models/SupportTeamMember');
       const assignedMember = await SupportTeamMember.findById(assignedToId).select('fullname');
-      const assignedName = reverseName(assignedMember?.fullname || 'Unknown');
+      const assignedName = assignedMember?.fullname || 'Unknown';
       console.log(`📝 [createTicket] Assigned name: "${assignedName}"`);
 
+      // Log auto assignment
       await logTicketHistory(
         newTicket._id,
-        `Auto-assigned to <strong>${assignedName}</strong>`,
+        TICKET_LOGS.AUTO_ASSIGNED(assignedName),
         userId
       );
     }
@@ -580,9 +584,10 @@ exports.updateTicket = async (req, res) => {
 
     // 📝 Log status change
     if (updates.status && updates.status !== ticket.status) {
+      const userName = req.user.fullname || req.user.email;
       ticket.history.push({
         timestamp: new Date(),
-        action: `Status changed from "${previousStatus}" to "${updates.status}"`,
+        action: TICKET_LOGS.STATUS_CHANGED(previousStatus, updates.status, userName),
         user: userId
       });
 
@@ -599,17 +604,19 @@ exports.updateTicket = async (req, res) => {
 
     // 📝 Log other field changes
     if (updates.title && updates.title !== ticket.title) {
+      const userName = req.user.fullname || req.user.email;
       ticket.history.push({
         timestamp: new Date(),
-        action: `Title updated`,
+        action: OTHER_LOGS.FIELD_UPDATED('tiêu đề', userName),
         user: userId
       });
     }
 
     if (updates.description && updates.description !== ticket.description) {
+      const userName = req.user.fullname || req.user.email;
       ticket.history.push({
         timestamp: new Date(),
-        action: `Description updated`,
+        action: OTHER_LOGS.FIELD_UPDATED('mô tả', userName),
         user: userId
       });
     }
@@ -676,9 +683,10 @@ exports.deleteTicket = async (req, res) => {
     ticket.updatedAt = new Date();
 
     // Log history
+    const userName = req.user.fullname || req.user.email;
     ticket.history.push({
       timestamp: new Date(),
-      action: `Ticket cancelled by ${req.user.fullname || req.user.email}`,
+      action: TICKET_LOGS.TICKET_CANCELLED(userName),
       user: userId
     });
 
@@ -722,7 +730,7 @@ exports.addFeedback = async (req, res) => {
 
       ticket.history.push({
         timestamp: new Date(),
-        action: `<strong>${reverseName(req.user.fullname)}</strong> đã đánh giá lần đầu (<strong>${rating}</strong> sao${comment ? `, nhận xét: "<strong>${comment}</strong>"` : ""})`,
+        action: FEEDBACK_LOGS.FEEDBACK_INITIAL(req.user.fullname, rating, comment),
         user: req.user._id,
       });
 
@@ -748,7 +756,7 @@ exports.addFeedback = async (req, res) => {
 
       ticket.history.push({
         timestamp: new Date(),
-        action: `<strong>${reverseName(req.user.fullname)}</strong> đã cập nhật đánh giá từ <strong>${oldRating}</strong> lên <strong>${rating}</strong> sao, nhận xét: "<strong>${comment}</strong>"`,
+        action: FEEDBACK_LOGS.FEEDBACK_UPDATED(req.user.fullname, oldRating, rating, comment),
         user: req.user._id,
       });
     }
@@ -829,7 +837,7 @@ exports.escalateTicket = async (req, res) => {
     ticket.escalateLevel += 1;
     ticket.history.push({
       timestamp: new Date(),
-      action: `<strong>${reverseName(req.user.fullname)}</strong> đã nâng cấp ticket lên mức <strong>${ticket.escalateLevel}</strong>`,
+      action: OTHER_LOGS.TICKET_ESCALATED(req.user.fullname, ticket.escalateLevel),
       user: req.user._id,
     });
 
@@ -852,7 +860,7 @@ exports.checkSLA = async () => {
     ticket.escalateLevel += 1;
     ticket.history.push({
       timestamp: new Date(),
-      action: `Hết hạn SLA. Ticket đã được nâng cấp lên mức ${ticket.escalateLevel}`,
+      action: OTHER_LOGS.SLA_BREACH(ticket.escalateLevel),
     });
 
     await ticket.save();
@@ -1007,7 +1015,7 @@ exports.addSubTask = async (req, res) => {
 
     ticket.history.push({
       timestamp: new Date(),
-      action: `<strong>${reverseName(req.user.fullname)}</strong> đã tạo subtask <strong>"${title}"</strong>(trạng thái: <strong>${finalStatus}</strong>)`,
+      action: SUBTASK_LOGS.SUBTASK_CREATED(req.user.fullname, title, finalStatus),
       user: req.user._id,
     });
 
@@ -1045,13 +1053,16 @@ exports.updateSubTaskStatus = async (req, res) => {
     }
 
     if (subTask.status !== status) {
-      if (subTask.status !== status) {
-        ticket.history.push({
-          timestamp: new Date(),
-          action: `<strong>${reverseName(req.user.fullname)}</strong> đã đổi trạng thái subtask <strong>"${subTask.title}"</strong> từ <strong>${translateStatus(subTask.status)}</strong> sang <strong>${translateStatus(status)}</strong>`,
-          user: req.user._id,
-        });
-      }
+      ticket.history.push({
+        timestamp: new Date(),
+        action: SUBTASK_LOGS.SUBTASK_STATUS_CHANGED(
+          req.user.fullname,
+          subTask.title,
+          translateStatus(subTask.status),
+          translateStatus(status)
+        ),
+        user: req.user._id,
+      });
     }
 
     subTask.status = status;
@@ -1082,7 +1093,7 @@ exports.deleteSubTask = async (req, res) => {
 
     ticket.history.push({
       timestamp: new Date(),
-      action: `<strong>${reverseName(req.user.fullname)}</strong> đã xoá subtask <strong>"${subTask.title}"</strong>`,
+      action: SUBTASK_LOGS.SUBTASK_DELETED(req.user.fullname, subTask.title),
       user: req.user._id,
     });
 
@@ -1402,6 +1413,8 @@ async function createTicketHelper({ title, description, creatorId, fallbackCreat
     }
   } catch (_) {}
 
+  const creatorName = (await (async()=>{try{const u=await User.findById(creatorObjectId).lean();return u?.fullname||u?.email||creatorId;}catch(_){return creatorId;}})());
+
   const newTicket = new Ticket({
     ticketCode,
     title,
@@ -1415,7 +1428,7 @@ async function createTicketHelper({ title, description, creatorId, fallbackCreat
     history: [
       {
         timestamp: new Date(),
-        action: ` <strong>${(await (async()=>{try{const u=await User.findById(creatorObjectId).lean();return u?.fullname||u?.email||creatorId;}catch(_){return creatorId;}})())}</strong> đã tạo ticket và chỉ định cho <strong>${leastAssignedUser.fullname}</strong>`,
+        action: TICKET_LOGS.MANUAL_ASSIGNED(creatorName, leastAssignedUser.fullname),
         user: creatorObjectId,
       },
     ],
@@ -1507,13 +1520,13 @@ exports.assignTicketToMe = async (req, res) => {
     };
 
     // Log history
-    const assigneeName = reverseName(req.user.fullname);
-    const previousName = reverseName(previousAssignedTo);
+    const assigneeName = req.user.fullname;
+    const previousName = previousAssignedTo;
     console.log(`📝 [assignTicketToMe] Assignee: "${assigneeName}", Previous: "${previousName}"`);
 
     ticket.history.push({
       timestamp: new Date(),
-      action: `<strong>${assigneeName}</strong> đã nhận ticket từ <strong>${previousName}</strong>. Trạng thái chuyển sang <strong>Đang xử lý</strong>`,
+      action: TICKET_LOGS.TICKET_ACCEPTED(assigneeName, previousName),
       user: userId
     });
 
@@ -1585,9 +1598,10 @@ exports.cancelTicketWithReason = async (req, res) => {
     ticket.updatedAt = new Date();
 
     // Log history
+    const userName = req.user.fullname || req.user.email;
     ticket.history.push({
       timestamp: new Date(),
-      action: `<strong>${reverseName(req.user.fullname)}</strong> đã huỷ ticket. Lý do: <strong>"${cancelReason.trim()}"</strong>`,
+      action: TICKET_LOGS.TICKET_CANCELLED(userName, cancelReason.trim()),
       user: userId
     });
 
@@ -1692,7 +1706,7 @@ exports.acceptFeedback = async (req, res) => {
     // Log history
     ticket.history.push({
       timestamp: new Date(),
-      action: `<strong>${reverseName(req.user.fullname)}</strong> đã chấp nhận kết quả với đánh giá <strong>${rating} sao</strong>. Ticket chuyển sang <strong>"Đóng"</strong>.`,
+      action: FEEDBACK_LOGS.FEEDBACK_ACCEPTED(req.user.fullname, rating),
       user: userId
     });
 
@@ -1827,7 +1841,7 @@ exports.reopenTicket = async (req, res) => {
     // Log history
     ticket.history.push({
       timestamp: new Date(),
-      action: `<strong>${req.user.fullname}</strong> đã mở lại ticket. Trạng thái chuyển từ "${previousStatus}" sang "Đang xử lý".`,
+      action: TICKET_LOGS.TICKET_REOPENED(req.user.fullname, previousStatus),
       user: userId
     });
 
