@@ -1,5 +1,6 @@
 const axios = require('axios');
 const User = require('../models/Users');
+const SupportTeamMember = require('../models/SupportTeamMember');
 
 const FRAPPE_API_URL = process.env.FRAPPE_API_URL || 'https://admin.sis.wellspring.edu.vn';
 
@@ -450,6 +451,32 @@ exports.syncUsersManual = async (req, res) => {
             { $set: userData },
             { upsert: true, new: true, setDefaultsOnInsert: true }
           );
+
+          // Cập nhật SupportTeamMember nếu user này là member của support team
+          try {
+            const supportTeamMember = await SupportTeamMember.findOne({ email: userEmail });
+            if (supportTeamMember) {
+              // Cập nhật avatarUrl, fullname, department từ userData
+              // Sử dụng !== undefined để đảm bảo update ngay cả khi giá trị là empty string
+              if (userData.avatarUrl !== undefined) {
+                supportTeamMember.avatarUrl = userData.avatarUrl;
+              }
+              if (userData.fullname !== undefined) {
+                supportTeamMember.fullname = userData.fullname;
+              }
+              if (userData.department !== undefined) {
+                supportTeamMember.department = userData.department;
+              }
+              await supportTeamMember.save();
+              
+              if (avatarDebugCount <= 5 && userData.avatarUrl) {
+                console.log(`🔄 [Sync] Updated SupportTeamMember avatar for ${userEmail}: "${userData.avatarUrl}"`);
+              }
+            }
+          } catch (supportTeamErr) {
+            // Log nhưng không fail sync nếu update SupportTeamMember lỗi
+            console.warn(`⚠️  [Sync] Failed to update SupportTeamMember for ${userEmail}: ${supportTeamErr.message}`);
+          }
 
           return { success: true, email: userEmail, roles: result.roles || [] };
         } catch (err) {
