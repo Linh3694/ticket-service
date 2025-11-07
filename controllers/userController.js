@@ -67,10 +67,13 @@ async function getAllFrappeUsers(token) {
   try {
     console.log('🔍 [Sync] Fetching all Frappe users...');
     
+    // Tối ưu: Fetch với fields cần thiết và filter enabled ngay trong API call
     const listResponse = await axios.get(
       `${FRAPPE_API_URL}/api/resource/User`,
       {
         params: {
+          fields: JSON.stringify(['name', 'email', 'full_name', 'user_image', 'enabled', 'location', 'roles']),
+          filters: JSON.stringify([['enabled', '=', 1]]), // Chỉ lấy enabled users
           limit_page_length: 5000,
           order_by: 'name asc'
         },
@@ -82,30 +85,52 @@ async function getAllFrappeUsers(token) {
     );
     
     let userList = listResponse.data.data || [];
-    console.log(`✅ Found ${userList.length} users in Frappe`);
+    console.log(`✅ Found ${userList.length} enabled users in Frappe`);
     
-    // Step 2: Fetch chi tiết từng user
-    console.log(`🔍 Fetching details for all users...`);
+    // Frappe list API có thể không trả về roles (child table), cần fetch chi tiết
+    // Tối ưu: Fetch parallel với batch để nhanh hơn
     const detailedUsers = [];
+    const BATCH_SIZE = 10; // Fetch 10 users cùng lúc
     
-    for (const userItem of userList) {  // CHANGED: from slice(0, 100) to all
-      try {
-        const frappe_user = await getFrappeUserDetail(userItem.name, token);
-        
-        // Frappe có thể gửi enabled là string "1" hoặc number 1, cần normalize
-        const isEnabled = frappe_user?.enabled === 1 || frappe_user?.enabled === "1" || frappe_user?.enabled === true;
-        if (frappe_user && isEnabled) {
-          detailedUsers.push(frappe_user);
+    console.log(`🔍 Fetching details for ${userList.length} users (need roles)...`);
+    
+    // Chia thành batches và fetch parallel
+    for (let i = 0; i < userList.length; i += BATCH_SIZE) {
+      const batch = userList.slice(i, i + BATCH_SIZE);
+      console.log(`📦 Processing batch ${Math.floor(i / BATCH_SIZE) + 1}/${Math.ceil(userList.length / BATCH_SIZE)} (${batch.length} users)...`);
+      
+      // Fetch parallel cho batch này
+      const batchPromises = batch.map(async (userItem) => {
+        try {
+          const frappe_user = await getFrappeUserDetail(userItem.name, token);
+          
+          // Frappe có thể gửi enabled là string "1" hoặc number 1, cần normalize
+          const isEnabled = frappe_user?.enabled === 1 || frappe_user?.enabled === "1" || frappe_user?.enabled === true;
+          if (frappe_user && isEnabled) {
+            return frappe_user;
+          }
+          return null;
+        } catch (err) {
+          console.warn(`⚠️  Failed to fetch user ${userItem.name}: ${err.message}`);
+          return null;
         }
-      } catch (err) {
-        console.warn(`⚠️  Failed to fetch user ${userItem.name}`);
-      }
+      });
+      
+      const batchResults = await Promise.all(batchPromises);
+      const validUsers = batchResults.filter(u => u !== null);
+      detailedUsers.push(...validUsers);
+      
+      console.log(`✅ Batch ${Math.floor(i / BATCH_SIZE) + 1} completed: ${validUsers.length}/${batch.length} users`);
     }
     
     console.log(`✅ Fetched ${detailedUsers.length} enabled users`);
     return detailedUsers;
   } catch (error) {
     console.error('❌ Error fetching Frappe users:', error.message);
+    if (error.response) {
+      console.error('Response status:', error.response.status);
+      console.error('Response data:', JSON.stringify(error.response.data, null, 2));
+    }
     return [];
   }
 }
