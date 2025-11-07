@@ -7,29 +7,13 @@
 function normalizeVietnameseName(fullname) {
   if (!fullname) return fullname;
   const parts = fullname.trim().split(' ').filter(word => word.length > 0);
-  if (parts.length <= 1) return fullname;
+  if (parts.length < 3) return fullname; // Chỉ normalize nếu có 3 từ trở lên
 
-  // Danh sách họ Việt Nam phổ biến
-  const vietnameseSurnames = ['Nguyễn', 'Trần', 'Lê', 'Phạm', 'Hoàng', 'Huỳnh', 'Phan', 'Vũ', 'Võ', 'Đặng', 'Bùi', 'Đỗ', 'Hồ', 'Ngô', 'Dương', 'Lý'];
-
-  // Tìm họ (surname) trong tên và sắp xếp lại thành format chuẩn "Họ + Tên cuối + Tên đầu"
-  for (let i = 0; i < parts.length; i++) {
-    if (vietnameseSurnames.includes(parts[i])) {
-      const surname = parts[i];
-      const rest = parts.slice(0, i).concat(parts.slice(i + 1));
-
-      // Với 3 từ: Họ + Tên cuối + Tên đầu (để có format "Nguyễn Hải Linh")
-      if (rest.length === 2) {
-        return `${surname} ${rest[1]} ${rest[0]}`;
-      }
-
-      // Với nhiều hơn 3 từ hoặc ít hơn, giữ thứ tự gốc
-      return `${surname} ${rest.join(' ')}`;
-    }
-  }
-
-  // Nếu không tìm thấy họ trong danh sách, giữ nguyên format gốc
-  return fullname;
+  // Logic đơn giản: Chuyển từ đầu xuống cuối
+  // "Linh Nguyễn Hải" -> "Nguyễn Hải Linh"
+  const firstWord = parts[0];
+  const remainingWords = parts.slice(1);
+  return `${remainingWords.join(' ')} ${firstWord}`;
 }
 
 // Helper function to translate status to Vietnamese
