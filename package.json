@@ -6,7 +6,10 @@
   "scripts": {
     "start": "node app.js",
     "dev": "nodemon app.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node test-migrated-features.js",
+    "test-migration": "node test-migrated-features.js",
+    "cron-emails": "node cron-fetch-emails.js",
+    "cron-emails-bg": "node cron-fetch-emails.js &"
   },
   "dependencies": {
     "express": "^4.18.2",
