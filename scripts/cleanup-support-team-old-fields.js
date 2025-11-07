@@ -16,12 +16,30 @@ const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/wellsp
 async function cleanupOldFields() {
   try {
     console.log('🔄 Connecting to MongoDB...');
+    console.log(`📍 Connection string: ${MONGODB_URI}`);
     await mongoose.connect(MONGODB_URI);
     console.log('✅ Connected to MongoDB');
+    console.log(`📍 Database: ${mongoose.connection.db.databaseName}`);
 
     const SupportTeamMember = mongoose.connection.collection('supportteammembers');
     
-    // Count documents with old fields
+    // Check total documents first
+    const totalDocs = await SupportTeamMember.countDocuments({});
+    console.log(`\n📊 Total SupportTeamMember documents: ${totalDocs}`);
+    
+    // Show ALL documents to debug
+    console.log('\n🔍 All documents (checking for old fields):');
+    const allDocs = await SupportTeamMember.find({}).limit(5).toArray();
+    allDocs.forEach((doc, idx) => {
+      console.log(`\nDocument ${idx + 1}:`);
+      console.log(`  - email: ${doc.email}`);
+      console.log(`  - has fullname: ${doc.fullname !== undefined}`);
+      console.log(`  - has avatarUrl: ${doc.avatarUrl !== undefined}`);
+      console.log(`  - has department: ${doc.department !== undefined}`);
+      console.log(`  - has jobTitle: ${doc.jobTitle !== undefined}`);
+    });
+    
+    // Count documents with old fields (ANY of them)
     const count = await SupportTeamMember.countDocuments({
       $or: [
         { fullname: { $exists: true } },
@@ -31,10 +49,11 @@ async function cleanupOldFields() {
       ]
     });
     
-    console.log(`\n📊 Found ${count} documents with old fields`);
+    console.log(`\n📊 Documents with old fields: ${count}`);
     
     if (count === 0) {
-      console.log('✅ No cleanup needed!');
+      console.log('✅ No old fields found (this should not happen if documents shown above have these fields)');
+      console.log('⚠️  Check if schema is preventing field access');
       process.exit(0);
     }
     
