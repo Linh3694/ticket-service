@@ -10,6 +10,9 @@ const router = express.Router();
 // 📝 ENDPOINT 2: Manual sync all (AUTHENTICATED)
 router.post('/sync/manual', authenticate, userController.syncUsersManual);
 
+// 🔍 ENDPOINT DEBUG: Test fetch users (AUTHENTICATED)
+router.get('/debug/fetch-users', authenticate, userController.debugFetchUsers);
+
 // 📧 ENDPOINT 3: Sync user by email (AUTHENTICATED)
 router.post('/sync/email/:email', authenticate, userController.syncUserByEmail);
 

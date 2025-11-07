@@ -73,14 +73,15 @@ async function getAllFrappeUsers(token) {
     let start = 0;
     const pageLength = 20; // Frappe có thể giới hạn mặc định là 20
     let hasMore = true;
+    const maxPages = 50; // Safety limit: max 50 pages (~1000 users) để tránh infinite loop
+    let pageCount = 0;
 
-    while (hasMore) {
+    while (hasMore && pageCount < maxPages) {
       const listResponse = await axios.get(
         `${FRAPPE_API_URL}/api/resource/User`,
         {
           params: {
-            fields: JSON.stringify(['name', 'email', 'full_name', 'user_image', 'enabled', 'location', 'roles']),
-            filters: JSON.stringify([['enabled', '=', 1]]), // Chỉ lấy enabled users
+            fields: JSON.stringify(['name', 'email', 'full_name', 'user_image', 'enabled', 'location', 'roles', 'docstatus']),
             limit_start: start,
             limit_page_length: pageLength,
             order_by: 'name asc'
@@ -92,22 +93,46 @@ async function getAllFrappeUsers(token) {
         }
       );
 
+      pageCount++;
       const userList = listResponse.data.data || [];
       const totalCount = listResponse.data.total_count || listResponse.data.total;
 
-      console.log(`📦 Page ${Math.floor(start / pageLength) + 1}: Found ${userList.length} enabled users (limit_start: ${start}, limit_page_length: ${pageLength})`);
+      console.log(`📦 Page ${pageCount}: Found ${userList.length} users (limit_start: ${start}, limit_page_length: ${pageLength})`);
+
+      // Debug: Check enabled field values in first few users
+      if (pageCount <= 3 && userList.length > 0) { // Debug first 3 pages
+        console.log(`🔍 [Debug] Page ${pageCount} users:`);
+        userList.slice(0, 3).forEach((user, idx) => {
+          console.log(`   User ${idx + 1}: email=${user.email}, enabled=${user.enabled} (type: ${typeof user.enabled}), docstatus=${user.docstatus}`);
+        });
+      }
+
       if (totalCount) {
-        console.log(`   📊 Reported total_count: ${totalCount} (enabled users only)`);
+        console.log(`   📊 Reported total_count: ${totalCount}`);
       }
 
       if (userList.length === 0) {
-        console.log(`✅ No more enabled users found, stopping pagination`);
+        console.log(`✅ No more users found, stopping pagination`);
         hasMore = false;
       } else {
-        allUsers.push(...userList);
+        // Filter enabled users only (double check)
+        const enabledUsers = userList.filter(user => {
+          const isEnabled = user.enabled === 1 || user.enabled === "1" || user.enabled === true;
+          return isEnabled;
+        });
 
+        console.log(`   ✅ Filtered ${enabledUsers.length} enabled users from ${userList.length} total users`);
+
+        allUsers.push(...enabledUsers);
+
+        // Safety check: stop if we hit max pages
+        if (pageCount >= maxPages) {
+          console.log(`⚠️  Reached max pages limit (${maxPages}), stopping to prevent infinite loop`);
+          console.log(`   📊 Collected ${allUsers.length} enabled users so far`);
+          hasMore = false;
+        }
         // KHÔNG tin vào total_count - tiếp tục paginate cho đến khi không còn data
-        if (userList.length < pageLength) {
+        else if (userList.length < pageLength) {
           // Nếu số users trả về ít hơn pageLength, đã hết data
           console.log(`✅ Last page reached (returned ${userList.length} < ${pageLength})`);
           hasMore = false;
@@ -335,6 +360,81 @@ exports.syncUsersManual = async (req, res) => {
     });
   } catch (error) {
     console.error('❌ [Manual Sync] Error:', error.message);
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+};
+
+// ✅ ENDPOINT DEBUG: Test fetch first page of users
+exports.debugFetchUsers = async (req, res) => {
+  try {
+    const token = req.header('Authorization')?.replace('Bearer ', '');
+
+    if (!token) {
+      return res.status(401).json({
+        success: false,
+        message: 'Token required'
+      });
+    }
+
+    console.log('🔍 [Debug] Testing Frappe user fetch...');
+
+    const listResponse = await axios.get(
+      `${FRAPPE_API_URL}/api/resource/User`,
+      {
+        params: {
+          fields: JSON.stringify(['name', 'email', 'full_name', 'user_image', 'enabled', 'location', 'roles', 'docstatus']),
+          limit_start: 0,
+          limit_page_length: 10, // Only first 10 users
+          order_by: 'name asc'
+        },
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'X-Frappe-CSRF-Token': token
+        }
+      }
+    );
+
+    const userList = listResponse.data.data || [];
+    const totalCount = listResponse.data.total_count || listResponse.data.total;
+
+    console.log(`📦 Found ${userList.length} users (total_count: ${totalCount})`);
+
+    // Analyze enabled field
+    const enabledStats = {
+      total: userList.length,
+      enabled_true: userList.filter(u => u.enabled === true).length,
+      enabled_1_number: userList.filter(u => u.enabled === 1).length,
+      enabled_1_string: userList.filter(u => u.enabled === "1").length,
+      enabled_0: userList.filter(u => u.enabled === 0 || u.enabled === "0" || u.enabled === false).length,
+      enabled_null: userList.filter(u => u.enabled === null || u.enabled === undefined).length,
+      docstatus_0: userList.filter(u => u.docstatus === 0).length,
+      docstatus_1: userList.filter(u => u.docstatus === 1).length,
+      docstatus_2: userList.filter(u => u.docstatus === 2).length
+    };
+
+    console.log('📊 Enabled field analysis:', enabledStats);
+
+    const sampleUsers = userList.slice(0, 5).map(user => ({
+      email: user.email,
+      name: user.name,
+      enabled: user.enabled,
+      enabled_type: typeof user.enabled,
+      docstatus: user.docstatus,
+      full_name: user.full_name
+    }));
+
+    res.status(200).json({
+      success: true,
+      message: 'Debug fetch completed',
+      stats: enabledStats,
+      sample_users: sampleUsers,
+      total_count: totalCount
+    });
+  } catch (error) {
+    console.error('❌ [Debug] Error:', error.message);
     res.status(500).json({
       success: false,
       message: error.message
