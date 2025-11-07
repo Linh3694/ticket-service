@@ -67,30 +67,51 @@ async function getAllFrappeUsers(token) {
   try {
     console.log('🔍 [Sync] Fetching all Frappe users...');
     
-    // Tối ưu: Fetch với fields cần thiết - LẤY TẤT CẢ USERS (không filter enabled)
-    const listResponse = await axios.get(
-      `${FRAPPE_API_URL}/api/resource/User`,
-      {
-        params: {
-          fields: JSON.stringify(['name', 'email', 'full_name', 'user_image', 'enabled', 'location', 'roles']),
-          // Không filter enabled - lấy tất cả users
-          limit_page_length: 5000,
-          order_by: 'name asc'
-        },
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'X-Frappe-CSRF-Token': token
+    // Paginate để lấy TẤT CẢ users
+    const allUsers = [];
+    let start = 0;
+    const pageLength = 1000; // Lấy nhiều nhất có thể mỗi page
+    let hasMore = true;
+    
+    while (hasMore) {
+      const listResponse = await axios.get(
+        `${FRAPPE_API_URL}/api/resource/User`,
+        {
+          params: {
+            fields: JSON.stringify(['name', 'email', 'full_name', 'user_image', 'enabled', 'location', 'roles']),
+            limit_start: start,
+            limit_page_length: pageLength,
+            order_by: 'name asc'
+          },
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'X-Frappe-CSRF-Token': token
+          }
+        }
+      );
+      
+      const userList = listResponse.data.data || [];
+      console.log(`📦 Page ${Math.floor(start / pageLength) + 1}: Found ${userList.length} users`);
+      
+      if (userList.length === 0) {
+        hasMore = false;
+      } else {
+        allUsers.push(...userList);
+        start += pageLength;
+        
+        // Nếu số users trả về ít hơn pageLength, đã hết data
+        if (userList.length < pageLength) {
+          hasMore = false;
         }
       }
-    );
+    }
     
-    let userList = listResponse.data.data || [];
-    console.log(`✅ Found ${userList.length} users in Frappe (all users, including disabled)`);
+    console.log(`✅ Found total ${allUsers.length} users in Frappe (all users, including disabled)`);
     
     // Tối ưu: Sử dụng data từ list API luôn (đã có đủ fields cần thiết)
     // Roles sẽ được update sau qua webhook hoặc khi user login
     // Nếu list API không có roles, sẽ là empty array và sẽ được update sau
-    const detailedUsers = userList.map(user => {
+    const detailedUsers = allUsers.map(user => {
       // Đảm bảo có đủ fields cần thiết
       return {
         name: user.name,
