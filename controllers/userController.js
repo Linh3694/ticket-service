@@ -242,6 +242,9 @@ async function getAllFrappeUsers(token) {
           
           const userDetail = detailResponse.data.data || {};
           
+          // Trong Frappe, User.name thường là email, nếu email field không có thì dùng name
+          const finalEmail = userDetail.email || user.email || user.name || '';
+          
           // Normalize roles từ detail API
           // Roles có thể là array hoặc child table trong Frappe
           let normalizedRoles = [];
@@ -257,19 +260,60 @@ async function getAllFrappeUsers(token) {
             ).filter(Boolean);
           }
           
-          // Nếu vẫn không có roles, thử fetch từ Has Role API
+          // Nếu vẫn không có roles, thử fetch từ Has Role API hoặc API method
           if (normalizedRoles.length === 0) {
             try {
-              // Frappe có thể có API để lấy roles, nhưng thường roles được lấy từ detail API
-              // Nếu detail API không có, có thể cần query Has Role table riêng
-              // Tạm thời để empty, sẽ được update sau qua webhook hoặc khi user login
+              // Thử query Has Role table để lấy roles
+              const hasRoleResponse = await axios.get(
+                `${FRAPPE_API_URL}/api/resource/Has Role`,
+                {
+                  params: {
+                    filters: JSON.stringify([
+                      ["Has Role", "parent", "=", finalEmail],
+                      ["Has Role", "parenttype", "=", "User"]
+                    ]),
+                    fields: JSON.stringify(["role"]),
+                    limit_page_length: 100
+                  },
+                  headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'X-Frappe-CSRF-Token': token
+                  }
+                }
+              );
+              
+              if (hasRoleResponse.data && hasRoleResponse.data.data) {
+                normalizedRoles = hasRoleResponse.data.data
+                  .map(item => item.role)
+                  .filter(Boolean);
+              }
             } catch (rolesErr) {
-              // Ignore, roles sẽ được update sau
+              // Nếu query Has Role fail, thử API method
+              try {
+                const rolesMethodResponse = await axios.get(
+                  `${FRAPPE_API_URL}/api/method/erp.api.erp_common_user.user_management.get_user_roles`,
+                  {
+                    params: {
+                      user_email: finalEmail
+                    },
+                    headers: {
+                      'Authorization': `Bearer ${token}`,
+                      'X-Frappe-CSRF-Token': token
+                    }
+                  }
+                );
+                
+                if (rolesMethodResponse.data && rolesMethodResponse.data.message && rolesMethodResponse.data.message.roles) {
+                  normalizedRoles = Array.isArray(rolesMethodResponse.data.message.roles) 
+                    ? rolesMethodResponse.data.message.roles 
+                    : [];
+                }
+              } catch (methodErr) {
+                // Ignore, roles sẽ được update sau qua webhook hoặc khi user login
+                console.warn(`⚠️  [Sync] Could not fetch roles for ${finalEmail}: ${methodErr.message}`);
+              }
             }
           }
-          
-          // Trong Frappe, User.name thường là email, nếu email field không có thì dùng name
-          const finalEmail = userDetail.email || user.email || user.name || '';
           
           return {
             name: userDetail.name || user.name,
