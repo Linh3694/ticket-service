@@ -88,12 +88,10 @@ async function getAllFrappeUsers(token) {
               'job_title', 'designation', 'employee_code', 'microsoft_id',
               'roles', 'docstatus', 'user_type'
             ]),
-            // Add back filter để Frappe chỉ trả enabled users
-            filters: JSON.stringify([
-              ["User", "enabled", "=", 1]
-            ]),
+            // Bỏ filter để test - xem Frappe có thực sự trả về nhiều users không
             limit_start: start,
-            limit_page_length: pageLength,
+            limit_page_length: pageLength, // Standard Frappe param
+            page_length: pageLength, // Backup param (some versions use this)
             order_by: 'name asc'
           },
           headers: {
