@@ -167,11 +167,15 @@ async function getAllFrappeUsers(token) {
         allUsers.push(...enabledUsers);
 
         // Check if we've reached the last page
-        if (userList.length < pageLength) {
-          console.log(`   🏁 Last page (${userList.length} < ${pageLength})`);
+        // KHÔNG dùng length < pageLength vì Frappe có thể hard limit 20 users/request
+        // Chỉ stop khi:
+        // 1. userList.length = 0 (thực sự không còn data)
+        // 2. Hoặc đã detect duplicate ở trên (newUsersCount = 0)
+        if (userList.length === 0) {
+          console.log(`   🏁 Last page (no more data)`);
           hasMore = false;
         } else {
-          start += pageLength;
+          start += userList.length; // Tăng start theo số users thực tế nhận được
           console.log(`   ➡️  Fetching next page (start: ${start})...`);
         }
       }
