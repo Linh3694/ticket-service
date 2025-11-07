@@ -3,14 +3,28 @@
  * Định nghĩa tất cả format cho ticket history logs
  */
 
-// Helper function to reverse name parts (Nguyễn Hải Linh -> Linh Nguyễn Hải)
-function reverseName(fullname) {
+// Helper function to normalize Vietnamese names
+function normalizeVietnameseName(fullname) {
   if (!fullname) return fullname;
-  const parts = fullname.trim().split(' ');
-  if (parts.length <= 1) return fullname;
-  const firstName = parts[0];
-  const rest = parts.slice(1);
-  return rest.join(' ') + ' ' + firstName;
+  // For Vietnamese names, keep the original order (Họ + Tên đệm + Tên)
+  // Example: "Nguyễn Hải Linh" should stay "Nguyễn Hải Linh"
+  return fullname.trim();
+}
+
+// Helper function to translate status to Vietnamese
+function translateStatus(status) {
+  const statusMap = {
+    "In Progress": "Đang xử lý",
+    "Completed": "Hoàn thành",
+    "Cancelled": "Đã huỷ",
+    "Pending": "Chờ xử lý",
+    "Done": "Hoàn thành",
+    "Processing": "Đang xử lý",
+    "Assigned": "Đã nhận",
+    "Waiting for Customer": "Chờ phản hồi",
+    "Closed": "Đã đóng"
+  };
+  return statusMap[status] || status;
 }
 
 /**
@@ -19,43 +33,43 @@ function reverseName(fullname) {
 const TICKET_LOGS = {
   // Tạo ticket
   TICKET_CREATED: (userName) =>
-    `Ticket được tạo bởi <strong>${reverseName(userName)}</strong>`,
+    `Ticket được tạo bởi <strong>${normalizeVietnameseName(userName)}</strong>`,
 
   // Auto assign
   AUTO_ASSIGNED: (assigneeName) =>
-    `Auto-assigned to <strong>${reverseName(assigneeName)}</strong>`,
+    `Auto-assigned to <strong>${normalizeVietnameseName(assigneeName)}</strong>`,
 
   // Manual assign (creator assigns to assignee)
   MANUAL_ASSIGNED: (creatorName, assigneeName) =>
-    `<strong>${reverseName(creatorName)}</strong> đã tạo ticket và chỉ định cho <strong>${reverseName(assigneeName)}</strong>`,
+    `<strong>${normalizeVietnameseName(creatorName)}</strong> đã tạo ticket và chỉ định cho <strong>${normalizeVietnameseName(assigneeName)}</strong>`,
 
   // Status changes
   STATUS_CHANGED: (oldStatus, newStatus, userName) =>
-    `Trạng thái ticket được chuyển từ "${oldStatus}" sang "${newStatus}" bởi <strong>${reverseName(userName)}</strong>`,
+    `Trạng thái ticket được chuyển từ "${translateStatus(oldStatus)}" sang "${translateStatus(newStatus)}" bởi <strong>${normalizeVietnameseName(userName)}</strong>`,
 
   // Accept ticket (assign to me)
   TICKET_ACCEPTED: (assigneeName, previousAssigneeName = null) => {
     if (previousAssigneeName) {
-      return `<strong>${reverseName(assigneeName)}</strong> đã nhận ticket từ <strong>${reverseName(previousAssigneeName)}</strong>. Trạng thái chuyển sang <strong>Đang xử lý</strong>`;
+      return `<strong>${normalizeVietnameseName(assigneeName)}</strong> đã nhận ticket từ <strong>${normalizeVietnameseName(previousAssigneeName)}</strong>. Trạng thái chuyển sang <strong>Đang xử lý</strong>`;
     }
-    return `<strong>${reverseName(assigneeName)}</strong> đã nhận ticket. Trạng thái chuyển sang <strong>Đang xử lý</strong>`;
+    return `<strong>${normalizeVietnameseName(assigneeName)}</strong> đã nhận ticket. Trạng thái chuyển sang <strong>Đang xử lý</strong>`;
   },
 
   // Cancel ticket
   TICKET_CANCELLED: (userName, reason = null) => {
     if (reason) {
-      return `<strong>${reverseName(userName)}</strong> đã huỷ ticket. Lý do: <strong>"${reason}"</strong>`;
+      return `<strong>${normalizeVietnameseName(userName)}</strong> đã huỷ ticket. Lý do: <strong>"${reason}"</strong>`;
     }
-    return `<strong>${reverseName(userName)}</strong> đã huỷ ticket`;
+    return `<strong>${normalizeVietnameseName(userName)}</strong> đã huỷ ticket`;
   },
 
   // Reopen ticket
   TICKET_REOPENED: (userName, previousStatus) =>
-    `<strong>${reverseName(userName)}</strong> đã mở lại ticket. Trạng thái chuyển từ <strong>"${previousStatus}"</strong> sang <strong>"Đang xử lý"</strong>`,
+    `<strong>${normalizeVietnameseName(userName)}</strong> đã mở lại ticket. Trạng thái chuyển từ <strong>"${translateStatus(previousStatus)}"</strong> sang <strong>"Đang xử lý"</strong>`,
 
   // Accept feedback
   FEEDBACK_ACCEPTED: (userName, rating) =>
-    `<strong>${reverseName(userName)}</strong> đã chấp nhận kết quả với đánh giá <strong>${rating} sao</strong>. Ticket chuyển sang <strong>"Đóng"</strong>`,
+    `<strong>${normalizeVietnameseName(userName)}</strong> đã chấp nhận kết quả với đánh giá <strong>${rating} sao</strong>. Ticket chuyển sang <strong>"Đóng"</strong>`,
 };
 
 /**
@@ -64,15 +78,15 @@ const TICKET_LOGS = {
 const SUBTASK_LOGS = {
   // Create subtask
   SUBTASK_CREATED: (userName, title, status) =>
-    `<strong>${reverseName(userName)}</strong> đã tạo subtask <strong>"${title}"</strong>(trạng thái: <strong>${status}</strong>)`,
+    `<strong>${normalizeVietnameseName(userName)}</strong> đã tạo subtask <strong>"${title}"</strong>(trạng thái: <strong>${translateStatus(status)}</strong>)`,
 
   // Update subtask status
   SUBTASK_STATUS_CHANGED: (userName, title, oldStatus, newStatus) =>
-    `<strong>${reverseName(userName)}</strong> đã đổi trạng thái subtask <strong>"${title}"</strong> từ <strong>${oldStatus}</strong> sang <strong>${newStatus}</strong>`,
+    `<strong>${normalizeVietnameseName(userName)}</strong> đã đổi trạng thái subtask <strong>"${title}"</strong> từ <strong>${translateStatus(oldStatus)}</strong> sang <strong>${translateStatus(newStatus)}</strong>`,
 
   // Delete subtask
   SUBTASK_DELETED: (userName, title) =>
-    `<strong>${reverseName(userName)}</strong> đã xoá subtask <strong>"${title}"</strong>`,
+    `<strong>${normalizeVietnameseName(userName)}</strong> đã xoá subtask <strong>"${title}"</strong>`,
 };
 
 /**
@@ -82,14 +96,14 @@ const FEEDBACK_LOGS = {
   // Initial feedback
   FEEDBACK_INITIAL: (userName, rating, comment = null) => {
     if (comment) {
-      return `<strong>${reverseName(userName)}</strong> đã đánh giá lần đầu (<strong>${rating}</strong> sao, nhận xét: "<strong>${comment}</strong>")`;
+      return `<strong>${normalizeVietnameseName(userName)}</strong> đã đánh giá lần đầu (<strong>${rating}</strong> sao, nhận xét: "<strong>${comment}</strong>")`;
     }
-    return `<strong>${reverseName(userName)}</strong> đã đánh giá lần đầu (<strong>${rating}</strong> sao)`;
+    return `<strong>${normalizeVietnameseName(userName)}</strong> đã đánh giá lần đầu (<strong>${rating}</strong> sao)`;
   },
 
   // Update feedback
   FEEDBACK_UPDATED: (userName, oldRating, newRating, comment) =>
-    `<strong>${reverseName(userName)}</strong> đã cập nhật đánh giá từ <strong>${oldRating}</strong> lên <strong>${newRating}</strong> sao, nhận xét: "<strong>${comment}</strong>"`,
+    `<strong>${normalizeVietnameseName(userName)}</strong> đã cập nhật đánh giá từ <strong>${oldRating}</strong> lên <strong>${newRating}</strong> sao, nhận xét: "<strong>${comment}</strong>"`,
 };
 
 /**
@@ -98,7 +112,7 @@ const FEEDBACK_LOGS = {
 const OTHER_LOGS = {
   // Escalation
   TICKET_ESCALATED: (userName, level) =>
-    `<strong>${reverseName(userName)}</strong> đã nâng cấp ticket lên mức <strong>${level}</strong>`,
+    `<strong>${normalizeVietnameseName(userName)}</strong> đã nâng cấp ticket lên mức <strong>${level}</strong>`,
 
   // SLA breach
   SLA_BREACH: (level) =>
@@ -106,7 +120,7 @@ const OTHER_LOGS = {
 
   // Field updates
   FIELD_UPDATED: (fieldName, userName) =>
-    `Thông tin ${fieldName} được cập nhật bởi <strong>${reverseName(userName)}</strong>`,
+    `Thông tin ${fieldName} được cập nhật bởi <strong>${normalizeVietnameseName(userName)}</strong>`,
 };
 
 module.exports = {
@@ -114,5 +128,6 @@ module.exports = {
   SUBTASK_LOGS,
   FEEDBACK_LOGS,
   OTHER_LOGS,
-  reverseName
+  normalizeVietnameseName,
+  translateStatus
 };

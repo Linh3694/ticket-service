@@ -1,7 +1,7 @@
 const Ticket = require("../models/Ticket");
 const SupportTeam = require("../models/SupportTeam");
 const notificationService = require('../services/notificationService');
-const { TICKET_LOGS, SUBTASK_LOGS, FEEDBACK_LOGS, OTHER_LOGS } = require('../utils/logFormatter');
+const { TICKET_LOGS, SUBTASK_LOGS, FEEDBACK_LOGS, OTHER_LOGS, normalizeVietnameseName, translateStatus } = require('../utils/logFormatter');
 const mongoose = require("mongoose");
 const axios = require('axios');
 const fs = require('fs');
@@ -173,20 +173,6 @@ function getVNTimeString() {
   return `${formatted}`;
 }
 
-function translateStatus(status) {
-  const statusMap = {
-    "Assigned": "Đã nhận",
-    "Processing": "Đang xử lý",
-    "In Progress": "Đang xử lý",
-    "Completed": "Hoàn thành",
-    "Done": "Hoàn thành",
-    "Cancelled": "Đã huỷ",
-    "Waiting for Customer": "Chờ phản hồi",
-    "Closed": "Đã đóng",
-  };
-
-  return statusMap[status] || status;
-}
 
 
 // a) Tạo ticket
