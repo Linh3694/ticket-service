@@ -88,10 +88,12 @@ async function getAllFrappeUsers(token) {
               'job_title', 'designation', 'employee_code', 'microsoft_id',
               'roles', 'docstatus', 'user_type'
             ]),
-            // Bỏ filter để test - xem Frappe có thực sự trả về nhiều users không
+            // Add back filter enabled users
+            filters: JSON.stringify([
+              ["User", "enabled", "=", 1]
+            ]),
             limit_start: start,
-            limit_page_length: pageLength, // Standard Frappe param
-            page_length: pageLength, // Backup param (some versions use this)
+            limit_page_length: pageLength,
             order_by: 'name asc'
           },
           headers: {
@@ -102,34 +104,22 @@ async function getAllFrappeUsers(token) {
       );
 
       const userList = listResponse.data.data || [];
-      console.log(`   📄 Page ${pageCount} fetched: ${userList.length} users (start: ${start})`);
 
       if (userList.length === 0) {
         hasMore = false;
       } else {
         // Detect duplicate data (infinite loop protection)
         let newUsersCount = 0;
-        let duplicateEmails = [];
         for (const user of userList) {
           const email = user.email || user.name;
-          if (email) {
-            if (!seenEmails.has(email)) {
-              seenEmails.add(email);
-              newUsersCount++;
-            } else {
-              duplicateEmails.push(email);
-            }
+          if (email && !seenEmails.has(email)) {
+            seenEmails.add(email);
+            newUsersCount++;
           }
         }
         
-        console.log(`   🆕 ${newUsersCount} new users, ${duplicateEmails.length} duplicates in this page`);
-        
-        if (duplicateEmails.length > 0) {
-          console.log(`   🔄 Sample duplicates: ${duplicateEmails.slice(0, 3).join(', ')}`);
-        }
-        
         if (newUsersCount === 0) {
-          console.log(`   ⚠️  No new users - stopping (all duplicates or reached end)`);
+          console.log(`   ⚠️  Page ${pageCount}: All duplicates, stopping pagination`);
           hasMore = false;
           break;
         }
@@ -163,34 +153,27 @@ async function getAllFrappeUsers(token) {
           return true;
         });
 
-        console.log(`   ✅ Kept ${enabledUsers.length}/${userList.length} users after filter`);
         allUsers.push(...enabledUsers);
 
         // Check if we've reached the last page
-        // KHÔNG dùng length < pageLength vì Frappe có thể hard limit 20 users/request
-        // Chỉ stop khi:
-        // 1. userList.length = 0 (thực sự không còn data)
-        // 2. Hoặc đã detect duplicate ở trên (newUsersCount = 0)
         if (userList.length === 0) {
-          console.log(`   🏁 Last page (no more data)`);
           hasMore = false;
         } else {
-          start += userList.length; // Tăng start theo số users thực tế nhận được
-          console.log(`   ➡️  Fetching next page (start: ${start})...`);
+          start += userList.length;
         }
       }
       
-      // Progress log every 500 users
-      if (allUsers.length % 500 === 0 && allUsers.length > 0) {
-        console.log(`   📊 Fetched ${allUsers.length} enabled users so far...`);
+      // Progress log every 100 users
+      if (allUsers.length > 0 && allUsers.length % 100 === 0) {
+        console.log(`   📊 Progress: ${allUsers.length} users synced...`);
       }
     }
 
     if (pageCount >= maxPages) {
-      console.log(`⚠️  Reached max pages limit (${maxPages} pages = ${maxPages * pageLength} users max)`);
+      console.log(`⚠️  Reached max pages limit (${maxPages} pages)`);
     }
 
-    console.log(`✅ Found ${allUsers.length} enabled users from Frappe (${pageCount} pages fetched)`);
+    console.log(`✅ Found ${allUsers.length} enabled users from Frappe`);
 
     // Không cần fetch detail nữa - list API đã đủ thông tin cần thiết
     // Roles thường empty và Has Role API bị 403, không cần thiết cho sync
