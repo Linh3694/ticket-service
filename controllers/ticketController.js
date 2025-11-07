@@ -722,7 +722,7 @@ exports.addFeedback = async (req, res) => {
 
       ticket.history.push({
         timestamp: new Date(),
-        action: ` <strong>${req.user.fullname}</strong> đã đánh giá lần đầu (<strong>${rating}</strong> sao${comment ? `, nhận xét: "<strong>${comment}</strong>"` : ""})`,
+        action: `<strong>${reverseName(req.user.fullname)}</strong> đã đánh giá lần đầu (<strong>${rating}</strong> sao${comment ? `, nhận xét: "<strong>${comment}</strong>"` : ""})`,
         user: req.user._id,
       });
 
@@ -748,7 +748,7 @@ exports.addFeedback = async (req, res) => {
 
       ticket.history.push({
         timestamp: new Date(),
-        action: ` <strong>${req.user.fullname}</strong> đã cập nhật đánh giá từ <strong>${oldRating}</strong> lên <strong>${rating}</strong> sao, nhận xét: "<strong>${comment}</strong>"`,
+        action: `<strong>${reverseName(req.user.fullname)}</strong> đã cập nhật đánh giá từ <strong>${oldRating}</strong> lên <strong>${rating}</strong> sao, nhận xét: "<strong>${comment}</strong>"`,
         user: req.user._id,
       });
     }
@@ -829,7 +829,7 @@ exports.escalateTicket = async (req, res) => {
     ticket.escalateLevel += 1;
     ticket.history.push({
       timestamp: new Date(),
-      action: ` ${req.user.fullname} đã nâng cấp ticket lên mức ${ticket.escalateLevel}`,
+      action: `<strong>${reverseName(req.user.fullname)}</strong> đã nâng cấp ticket lên mức <strong>${ticket.escalateLevel}</strong>`,
       user: req.user._id,
     });
 
@@ -995,9 +995,19 @@ exports.addSubTask = async (req, res) => {
 
     ticket.subTasks.push(newSubTask);
 
+    // Helper function to reverse name parts (reuse from assignTicketToMe if available, or define locally)
+    const reverseName = (fullname) => {
+      if (!fullname) return fullname;
+      const parts = fullname.trim().split(' ');
+      if (parts.length <= 1) return fullname;
+      const firstName = parts[0];
+      const rest = parts.slice(1);
+      return rest.join(' ') + ' ' + firstName;
+    };
+
     ticket.history.push({
       timestamp: new Date(),
-      action: ` <strong>${req.user.fullname}</strong> đã tạo subtask <strong>"${title}"</strong>(trạng thái: <strong>${finalStatus}</strong>)`,
+      action: `<strong>${reverseName(req.user.fullname)}</strong> đã tạo subtask <strong>"${title}"</strong>(trạng thái: <strong>${finalStatus}</strong>)`,
       user: req.user._id,
     });
 
@@ -1038,7 +1048,7 @@ exports.updateSubTaskStatus = async (req, res) => {
       if (subTask.status !== status) {
         ticket.history.push({
           timestamp: new Date(),
-          action: ` <strong>${req.user.fullname}</strong> đã đổi trạng thái subtask <strong>${subTask.title}</strong> từ <strong>${translateStatus(subTask.status)}</strong> sang <strong>${translateStatus(status)}</strong>`,
+          action: `<strong>${reverseName(req.user.fullname)}</strong> đã đổi trạng thái subtask <strong>"${subTask.title}"</strong> từ <strong>${translateStatus(subTask.status)}</strong> sang <strong>${translateStatus(status)}</strong>`,
           user: req.user._id,
         });
       }
@@ -1072,7 +1082,7 @@ exports.deleteSubTask = async (req, res) => {
 
     ticket.history.push({
       timestamp: new Date(),
-      action: ` <strong>${req.user.fullname}</strong> đã xoá subtask <strong>"${subTask.title}"</strong>`,
+      action: `<strong>${reverseName(req.user.fullname)}</strong> đã xoá subtask <strong>"${subTask.title}"</strong>`,
       user: req.user._id,
     });
 
@@ -1577,7 +1587,7 @@ exports.cancelTicketWithReason = async (req, res) => {
     // Log history
     ticket.history.push({
       timestamp: new Date(),
-      action: `<strong>${req.user.fullname}</strong> đã huỷ ticket. Lý do: <strong>"${cancelReason.trim()}"</strong>`,
+      action: `<strong>${reverseName(req.user.fullname)}</strong> đã huỷ ticket. Lý do: <strong>"${cancelReason.trim()}"</strong>`,
       user: userId
     });
 
@@ -1682,7 +1692,7 @@ exports.acceptFeedback = async (req, res) => {
     // Log history
     ticket.history.push({
       timestamp: new Date(),
-      action: `<strong>${req.user.fullname}</strong> đã chấp nhận kết quả với đánh giá <strong>${rating} sao</strong>. Ticket chuyển sang "Đóng".`,
+      action: `<strong>${reverseName(req.user.fullname)}</strong> đã chấp nhận kết quả với đánh giá <strong>${rating} sao</strong>. Ticket chuyển sang <strong>"Đóng"</strong>.`,
       user: userId
     });
 
