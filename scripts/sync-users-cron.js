@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 
 /**
- * 🔄 Daily Cron Job: Sync All Users from Frappe
- * 
- * This script runs automatically via cron to sync all users from Frappe
- * as a backup in case webhooks fail.
- * 
+ * 🔄 Daily Cron Job: Sync Enabled Users from Frappe
+ *
+ * This script runs automatically via cron to sync only ENABLED users from Frappe
+ * as a backup in case webhooks fail. Optimized for performance with batch processing.
+ *
  * Usage: node sync-users-cron.js
- * 
+ *
  * Requires environment variables:
  * - FRAPPE_API_KEY and FRAPPE_API_SECRET (preferred)
  * - OR FRAPPE_API_TOKEN (fallback)
@@ -58,17 +58,17 @@ function buildAuthHeaders() {
 
 const syncAllUsers = async () => {
   const startTime = new Date();
-  console.log(`\n🔄 [Cron] Starting daily user sync at ${startTime.toISOString()}`);
-  
+  console.log(`\n🔄 [Cron] Starting daily ENABLED user sync at ${startTime.toISOString()}`);
+
   try {
     const headers = buildAuthHeaders();
     const url = `${TICKET_SERVICE_URL}/api/ticket/user/sync/manual`;
-    
-    console.log(`📡 Calling: ${url}`);
+
+    console.log(`📡 Calling: ${url} (enabled users only)`);
     
     const response = await axios.post(url, {}, {
       headers,
-      timeout: 300000 // 5 minutes timeout
+      timeout: 120000 // 2 minutes timeout (chỉ sync enabled users ~400, tối ưu hơn)
     });
     
     const data = response.data;
@@ -90,16 +90,16 @@ const syncAllUsers = async () => {
         }
       }
       
-      console.log(`✅ [Cron] Daily sync completed at ${endTime.toISOString()}\n`);
+      console.log(`✅ [Cron] Daily enabled user sync completed at ${endTime.toISOString()}\n`);
       process.exit(0);
     } else {
-      console.error(`❌ [Cron] Sync failed: ${data.message}`);
+      console.error(`❌ [Cron] Enabled user sync failed: ${data.message}`);
       process.exit(1);
     }
   } catch (error) {
     const endTime = new Date();
     const duration = ((endTime - startTime) / 1000).toFixed(2);
-    
+
     console.error(`❌ [Cron] Error after ${duration}s:`);
     if (error.response) {
       console.error(`Status: ${error.response.status}`);
@@ -107,8 +107,8 @@ const syncAllUsers = async () => {
     } else {
       console.error(error.message);
     }
-    
-    console.error(`❌ [Cron] Daily sync failed at ${endTime.toISOString()}\n`);
+
+    console.error(`❌ [Cron] Daily enabled user sync failed at ${endTime.toISOString()}\n`);
     process.exit(1);
   }
 };

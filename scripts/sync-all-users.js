@@ -1,9 +1,11 @@
 #!/usr/bin/env node
 
 /**
- * 🔄 Manual Sync All Users Script
+ * 🔄 Manual Sync Enabled Users Script
  * Usage: node sync-all-users.js <TOKEN> [TICKET_SERVICE_URL]
- * 
+ *
+ * This script syncs only ENABLED users from Frappe for better performance.
+ *
  * Example:
  *   node sync-all-users.js eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
  */
@@ -28,8 +30,8 @@ const syncAllUsers = async () => {
   try {
     const url = `${baseURL}/api/ticket/user/sync/manual`;
     
-    console.log('🔄 Starting User Sync...');
-    console.log(`URL: ${url}`);
+    console.log('🔄 Starting Enabled User Sync...');
+    console.log(`URL: ${url} (enabled users only)`);
     console.log('');
     
     const response = await axios.post(url, {}, {

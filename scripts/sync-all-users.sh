@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# 🔄 Manual Sync All Users Script
+# 🔄 Manual Sync Enabled Users Script
 # Usage: ./sync-all-users.sh <FRAPPE_TOKEN>
 
 set -e
@@ -28,9 +28,9 @@ if [ -z "$TOKEN" ]; then
     exit 1
 fi
 
-echo -e "${YELLOW}🔄 Starting User Sync...${NC}"
-echo "URL: $FULL_URL"
-echo ""
+    echo -e "${YELLOW}🔄 Starting Enabled User Sync...${NC}"
+    echo "URL: $FULL_URL (enabled users only)"
+    echo ""
 
 # Make request
 response=$(curl -s -X POST "$FULL_URL" \

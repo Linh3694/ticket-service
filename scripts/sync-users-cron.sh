@@ -1,9 +1,9 @@
 #!/bin/bash
 
-# 🔄 Daily Cron Job: Sync All Users from Frappe
+# 🔄 Daily Cron Job: Sync Enabled Users from Frappe
 # 
-# This script runs automatically via cron to sync all users from Frappe
-# as a backup in case webhooks fail.
+# This script runs automatically via cron to sync only ENABLED users from Frappe
+# as a backup in case webhooks fail. Optimized for performance.
 #
 # Usage: ./sync-users-cron.sh
 #

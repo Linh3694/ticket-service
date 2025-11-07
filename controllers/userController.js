@@ -233,54 +233,108 @@ exports.syncAllUsers = async (req, res) => {
 };
 */
 
-// ✅ ENDPOINT 2: Manual sync all
+// ✅ ENDPOINT 2: Manual sync all enabled users (batch processing)
 exports.syncUsersManual = async (req, res) => {
   try {
     const token = req.header('Authorization')?.replace('Bearer ', '');
-    
+
     if (!token) {
       return res.status(401).json({
         success: false,
         message: 'Token required'
       });
     }
-    
-    console.log('📝 [Manual Sync] Starting...');
+
+    console.log('📝 [Manual Sync] Starting batch sync for enabled users only...');
+    const startTime = Date.now();
+
     const frappeUsers = await getAllFrappeUsers(token);
-    
+    console.log(`📊 [Manual Sync] Found ${frappeUsers.length} enabled users to sync`);
+
+    if (frappeUsers.length === 0) {
+      return res.status(200).json({
+        success: true,
+        message: 'No enabled users to sync',
+        stats: { synced: 0, failed: 0, total: 0 }
+      });
+    }
+
     let synced = 0;
     let failed = 0;
-    
-    for (const frappeUser of frappeUsers) {
-      try {
-        const userData = formatFrappeUser(frappeUser);
-        
-        // Log để debug avatar update
-        if (frappeUser.user_image) {
-          console.log(`🖼️  [Sync] Updating avatar for ${frappeUser.email}: ${userData.avatarUrl}`);
+    const batchSize = 10; // Process 10 users at a time
+    const batches = [];
+
+    // Chia thành các batch
+    for (let i = 0; i < frappeUsers.length; i += batchSize) {
+      batches.push(frappeUsers.slice(i, i + batchSize));
+    }
+
+    console.log(`🔄 [Manual Sync] Processing ${batches.length} batches of ${batchSize} users each...`);
+
+    // Process từng batch
+    for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
+      const batch = batches[batchIndex];
+      const batchStartTime = Date.now();
+
+      console.log(`📦 [Manual Sync] Processing batch ${batchIndex + 1}/${batches.length} (${batch.length} users)...`);
+
+      // Process batch parallel với Promise.allSettled
+      const batchPromises = batch.map(async (frappeUser) => {
+        try {
+          const userData = formatFrappeUser(frappeUser);
+
+          // Log để debug avatar update (chỉ log nếu có avatar)
+          if (frappeUser.user_image) {
+            console.log(`🖼️  [Sync] Updating avatar for ${frappeUser.email}: ${userData.avatarUrl}`);
+          }
+
+          await User.findOneAndUpdate(
+            { email: frappeUser.email },
+            userData,
+            { upsert: true, new: true }
+          );
+
+          return { success: true, email: frappeUser.email };
+        } catch (err) {
+          console.error(`❌ Failed: ${frappeUser.email}`, err.message);
+          return { success: false, email: frappeUser.email, error: err.message };
         }
-        
-        await User.findOneAndUpdate(
-          { email: frappeUser.email },
-          userData,
-          { upsert: true, new: true }
-        );
-        synced++;
-      } catch (err) {
-        console.error(`❌ Failed: ${frappeUser.email}`, err.message);
-        failed++;
+      });
+
+      const batchResults = await Promise.allSettled(batchPromises);
+
+      // Count results
+      batchResults.forEach(result => {
+        if (result.status === 'fulfilled' && result.value.success) {
+          synced++;
+        } else {
+          failed++;
+        }
+      });
+
+      const batchDuration = ((Date.now() - batchStartTime) / 1000).toFixed(2);
+      console.log(`✅ [Manual Sync] Batch ${batchIndex + 1} completed in ${batchDuration}s (${synced} synced, ${failed} failed so far)`);
+
+      // Progress logging mỗi 50 users
+      const totalProcessed = synced + failed;
+      if (totalProcessed % 50 === 0 || batchIndex === batches.length - 1) {
+        const progress = ((totalProcessed / frappeUsers.length) * 100).toFixed(1);
+        const elapsed = ((Date.now() - startTime) / 1000).toFixed(2);
+        console.log(`📊 [Manual Sync] Progress: ${totalProcessed}/${frappeUsers.length} users (${progress}%) in ${elapsed}s`);
       }
     }
-    
-    console.log(`✅ [Manual Sync] Complete: ${synced} synced, ${failed} failed`);
-    
+
+    const totalDuration = ((Date.now() - startTime) / 1000).toFixed(2);
+    console.log(`✅ [Manual Sync] Complete: ${synced} synced, ${failed} failed in ${totalDuration}s`);
+
     res.status(200).json({
       success: true,
-      message: 'Manual sync completed',
-      stats: { synced, failed }
+      message: `Manual sync completed for ${frappeUsers.length} enabled users`,
+      stats: { synced, failed, total: frappeUsers.length },
+      duration_seconds: parseFloat(totalDuration)
     });
   } catch (error) {
-    console.error('❌ Error:', error.message);
+    console.error('❌ [Manual Sync] Error:', error.message);
     res.status(500).json({
       success: false,
       message: error.message
