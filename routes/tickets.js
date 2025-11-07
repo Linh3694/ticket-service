@@ -2,14 +2,14 @@ const express = require("express");
 const router = express.Router();
 const ticketController = require("../controllers/ticketController");
 const { authenticate } = require("../middleware/authMiddleware");
-const upload = require("../middleware/uploadTicket");
+const { upload, handleUploadError } = require("../middleware/uploadTicket");
 const uploadMessage = require("../middleware/uploadMessage");
 
 // Ticket routes
 // ⚠️ IMPORTANT: Order matters! More specific routes BEFORE dynamic ones (:ticketId)
 
 // Static routes
-router.post("/", authenticate, upload.array("attachments", 15), ticketController.createTicket);
+router.post("/", authenticate, upload.array("attachments", 15), handleUploadError, ticketController.createTicket);
 router.get("/categories", ticketController.getTicketCategories);
 router.get("/debug/team-members", authenticate, ticketController.debugTeamMembers);
 router.get("/technical-stats/:userId", ticketController.getTechnicalStats);

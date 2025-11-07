@@ -1,35 +1,42 @@
-const multer = require('multer');
-const path = require('path');
+const multer = require("multer");
+const path = require("path");
+const fs = require("fs");
 
-// Configure storage for message files
+// Đảm bảo thư mục uploads/Messages tồn tại
+const messagesDir = path.join(__dirname, "../uploads/Messages");
+if (!fs.existsSync(messagesDir)) {
+  fs.mkdirSync(messagesDir, { recursive: true });
+}
+
 const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    // Match mobile client path expectation for message images
-    cb(null, 'uploads/Messages/');
+  destination: function (req, file, cb) {
+    cb(null, "uploads/Messages"); // thư mục lưu file
   },
-  filename: (req, file, cb) => {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    cb(null, 'msg-' + uniqueSuffix + path.extname(file.originalname));
-  }
+  filename: function (req, file, cb) {
+    const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
+    cb(null, uniqueSuffix + path.extname(file.originalname));
+  },
 });
 
-// File filter for messages (mainly images)
+// Cho phép upload nhiều loại file hơn
 const fileFilter = (req, file, cb) => {
-  const allowedTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
-  
-  if (allowedTypes.includes(file.mimetype)) {
-    cb(null, true);
+  const allowedTypes = /jpeg|jpg|png|gif|pdf|doc|docx|txt|zip|mp4|avi|mov/;
+  const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
+  const mimetype = allowedTypes.test(file.mimetype);
+
+  if (extname && mimetype) {
+    return cb(null, true);
   } else {
-    cb(new Error('Only image files are allowed for messages'), false);
+    cb(new Error("Loại file không được hỗ trợ"));
   }
 };
 
 const uploadMessage = multer({
-  storage: storage,
-  fileFilter: fileFilter,
+  storage,
   limits: {
-    fileSize: 5 * 1024 * 1024 // 5MB
-  }
+    fileSize: parseInt(process.env.MAX_FILE_SIZE) || 10 * 1024 * 1024, // 10MB default
+  },
+  fileFilter,
 });
 
-module.exports = uploadMessage; 
+module.exports = uploadMessage;

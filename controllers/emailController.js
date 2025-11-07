@@ -1,97 +1,53 @@
-// /backend/controllers/emailController.js
+// /ticket-service/controllers/emailController.js
+// Migrated from workspace-backend with adaptations for ticket-service architecture
+
 const nodemailer = require("nodemailer");
+const { ClientSecretCredential } = require("@azure/identity");
+const { Client } = require("@microsoft/microsoft-graph-client");
+const { TokenCredentialAuthenticationProvider } = require("@microsoft/microsoft-graph-client/authProviders/azureTokenCredentials");
 const Ticket = require("../models/Ticket");
+const User = require("../models/Users");
 const { v4: uuidv4 } = require("uuid");
 const ticketController = require("./ticketController");
 const { convert } = require('html-to-text'); // Added import for html-to-text
-const axios = require('axios');
+const SupportTeamMember = require("../models/SupportTeamMember");
 
-// Frappe API configuration
-const FRAPPE_API_URL = process.env.FRAPPE_API_URL || 'https://admin.sis.wellspring.edu.vn';
+// Khởi tạo OAuth 2.0 credentials
+const credential = process.env.TENANTTICKET_ID ? new ClientSecretCredential(
+  process.env.TENANTTICKET_ID,
+  process.env.CLIENTTICKET_ID,
+  process.env.CLIENTTICKET_SECRET
+) : null;
 
-// Build auth headers for Frappe requests (prefer API key/secret)
-function buildFrappeHeaders() {
-  const headers = { 'Content-Type': 'application/json', Accept: 'application/json' };
-  if (process.env.FRAPPE_API_KEY && process.env.FRAPPE_API_SECRET) {
-    headers['Authorization'] = `token ${process.env.FRAPPE_API_KEY}:${process.env.FRAPPE_API_SECRET}`;
-    return headers;
-  }
-  if (process.env.FRAPPE_API_TOKEN) {
-    headers['Authorization'] = `Bearer ${process.env.FRAPPE_API_TOKEN}`;
-    headers['X-Frappe-CSRF-Token'] = process.env.FRAPPE_API_TOKEN;
-    return headers;
-  }
-  return headers;
-}
+const authProvider = new TokenCredentialAuthenticationProvider(credential, {
+  scopes: ["https://graph.microsoft.com/.default"],
+});
 
-// Helper function to get user from Frappe
-async function getFrappeUserByEmail(email) {
-  try {
-    const response = await axios.get(
-      `${FRAPPE_API_URL}/api/resource/User`,
-      {
-        params: {
-          filters: JSON.stringify([["email","=", email]]),
-          fields: JSON.stringify(['name','email','full_name','user_image','enabled','department'])
-        },
-        headers: buildFrappeHeaders()
-      }
-    );
-    return response.data.data && response.data.data.length > 0 ? response.data.data[0] : null;
-  } catch (error) {
-    console.error('Error getting user from Frappe by email:', error);
-    return null;
-  }
-}
-
-// Helper: map email -> local Users collection (_id)
-async function getLocalUserIdByEmail(email) {
-  try {
-    const Users = require('../models/Users');
-    const user = await Users.findOne({ email }).select('_id email fullname');
-    return user ? user._id : null;
-  } catch (err) {
-    console.warn('[Ticket Service] getLocalUserIdByEmail error:', err.message);
-    return null;
-  }
-}
-
-// TEMPORARILY DISABLED: Azure Graph client initialization - Removed Microsoft dependencies
-
-// Initialize as null for now
-let graphClient = null;
-let credential = null;
-console.warn('⚠️ [Ticket Service] Azure Graph client temporarily disabled');
+const graphClient = Client.initWithMiddleware({
+  authProvider: authProvider,
+});
 
 // Hàm lấy access token cho OAuth 2.0
 const getAccessToken = async () => {
-  if (!credential) {
-    throw new Error('Azure credential not initialized');
-  }
-  
   try {
-    console.log("Đang lấy access token...");
+    console.log("📧 [Email] Đang lấy access token...");
     const token = await credential.getToken("https://graph.microsoft.com/.default");
-    console.log("Access token lấy thành công!");
+    console.log("✅ [Email] Access token lấy thành công!");
     return token.token;
   } catch (error) {
-    console.error("Lỗi khi lấy access token:", error);
+    console.error("❌ [Email] Lỗi khi lấy access token:", error);
     throw error;
   }
 };
 
 // Khởi tạo transporter cho SMTP (dùng OAuth 2.0)
 const createTransporter = async () => {
-  if (!credential) {
-    throw new Error('Azure credential not initialized');
-  }
-  
   const accessToken = await getAccessToken();
 
-  console.log("Đang tạo transporter SMTP...");
-  console.log("SMTP Email:", process.env.EMAIL_USER);
+  console.log("📧 [Email] Đang tạo transporter SMTP...");
+  console.log("📧 [Email] SMTP Email:", process.env.EMAIL_USER);
 
-  return nodemailer.createTransport({
+  return nodemailer.createTransporter({
     host: "smtp-mail.outlook.com",
     port: 587,
     secure: false, // STARTTLS
@@ -109,19 +65,12 @@ const createTransporter = async () => {
 // A) Hàm gửi email cập nhật trạng thái ticket
 exports.sendTicketStatusEmail = async (req, res) => {
   try {
-    if (!credential) {
-      return res.status(500).json({ 
-        success: false, 
-        message: "Azure credential not initialized. Please check Azure credentials." 
-      });
-    }
-
     const { ticketId, recipientEmail } = req.body;
-    console.log("Đang gửi email cho ticket:", ticketId, "tới:", recipientEmail);
+    console.log("📧 [Email] Đang gửi email cho ticket:", ticketId, "tới:", recipientEmail);
 
-    const ticket = await Ticket.findById(ticketId);
+    const ticket = await Ticket.findById(ticketId).populate('creator assignedTo');
     if (!ticket) {
-      console.log("Ticket không tồn tại:", ticketId);
+      console.log("❌ [Email] Ticket không tồn tại:", ticketId);
       return res.status(404).json({ success: false, message: "Ticket không tồn tại" });
     }
 
@@ -135,182 +84,202 @@ exports.sendTicketStatusEmail = async (req, res) => {
     };
 
     const info = await transporter.sendMail(mailOptions);
-    console.log("Email gửi thành công:", info.messageId);
+    console.log("✅ [Email] Email gửi thành công:", info.messageId);
 
     return res.status(200).json({ success: true, message: "Đã gửi email cập nhật ticket." });
   } catch (error) {
-    console.error("Lỗi khi gửi email ticket:", error);
+    console.error("❌ [Email] Lỗi khi gửi email ticket:", error);
     return res.status(500).json({ success: false, message: error.message });
   }
 };
 
-// Core inbox processor (reusable for route and background job)
-async function processInboxOnce(options = {}) {
-  const { includeRead = false, limit = 50 } = options;
-  if (!credential || !graphClient) {
-    console.warn('[Ticket Service] Graph client not initialized - skip email polling');
-    return { success: false, reason: 'graph_not_initialized', created: 0, skipped: 0 };
-  }
-
-  const userEmail = process.env.EMAIL_USER;
-  let request = graphClient
-    .api(`/users/${userEmail}/mailFolders/Inbox/messages`)
-    .select('id,subject,from,body,hasAttachments,isRead,receivedDateTime')
-    .expand('attachments')
-    .top(Math.min(Number(limit) || 50, 100))
-    .orderby('receivedDateTime desc');
-
-  if (!includeRead) {
-    request = request.filter('isRead eq false');
-  }
-
-  const messages = await request.get();
-
-  const list = messages.value || [];
-  if (!list.length) {
-    return { success: true, created: 0, skipped: 0 };
-  }
-
-  console.log(`[Ticket Service] Tìm thấy ${list.length} email chưa đọc`);
-
-  let created = 0;
-  let skipped = 0;
-
-  for (const msg of list) {
-    try {
-      const subject = msg.subject || 'Email Support';
-      const from = msg.from?.emailAddress?.address || '';
-      const content = msg.body?.content || '';
-      const lowerSubject = subject.trim().toLowerCase();
-      if (lowerSubject.startsWith('re:') || lowerSubject.startsWith('trả lời:')) {
-        if (!msg.isRead) {
-          await graphClient.api(`/users/${userEmail}/messages/${msg.id}`).update({ isRead: true });
-        }
-        skipped++; continue;
-      }
-
-      // Only accept internal domain
-      if (!from.endsWith('@wellspring.edu.vn')) {
-        if (!msg.isRead) {
-          await graphClient.api(`/users/${userEmail}/messages/${msg.id}`).update({ isRead: true });
-        }
-        skipped++; continue;
-      }
-
-      const plainContent = convert(content, { wordwrap: 130 });
-
-      // Find creator in Frappe (via API Key/Secret or token)
-      const creatorUser = await getFrappeUserByEmail(from);
-      if (!creatorUser) {
-        console.warn(`[Ticket Service] Không tìm thấy user Frappe cho ${from}, đánh dấu đã đọc và bỏ qua`);
-        if (!msg.isRead) {
-          await graphClient.api(`/users/${userEmail}/messages/${msg.id}`).update({ isRead: true });
-        }
-        skipped++; continue;
-      }
-
-      // Map sang user local (Mongo) theo email để lấy _id làm creator
-      const localCreatorId = await getLocalUserIdByEmail(from);
-      if (!localCreatorId) {
-        console.warn(`[Ticket Service] Không tìm thấy user LOCAL cho ${from}, đánh dấu đã đọc và bỏ qua`);
-        if (!msg.isRead) {
-          await graphClient.api(`/users/${userEmail}/messages/${msg.id}`).update({ isRead: true });
-        }
-        skipped++; continue;
-      }
-
-      // Prevent duplicates: skip if same subject by same creator within last 3 days
-      try {
-        const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000);
-        const dup = await Ticket.findOne({
-          title: subject,
-          creator: localCreatorId,
-          createdAt: { $gte: threeDaysAgo }
-        }).select('_id');
-        if (dup) {
-          console.log(`[Ticket Service] Bỏ qua email trùng lặp trong 3 ngày: ${subject} từ ${from}`);
-          if (!msg.isRead) {
-            await graphClient.api(`/users/${userEmail}/messages/${msg.id}`).update({ isRead: true });
-          }
-          skipped++; continue;
-        }
-      } catch (_) {}
-
-      let attachments = [];
-      if (msg.hasAttachments && msg.attachments?.value?.length) {
-        attachments = msg.attachments.value
-          .filter(att => att['@odata.type'] === '#microsoft.graph.fileAttachment')
-          .map(att => ({ filename: att.name, url: `data:${att.contentType};base64,${att.contentBytes}` }));
-      }
-
-      // Chuyển attachments sang dạng tương thích với createTicketHelper (giống multer)
-      const helperFiles = attachments.map(att => ({ originalname: att.filename, filename: att.url }));
-
-      const newTicket = await ticketController.createTicketHelper({
-        title: subject,
-        description: plainContent,
-        creatorId: localCreatorId,
-        priority: 'Medium',
-        files: helperFiles,
-      });
-      try {
-        console.log(`[Ticket Service] Tạo ticket từ email ${from}: ${newTicket.ticketCode}`);
-      } catch (_) {}
-
-      if (!msg.isRead) {
-        await graphClient.api(`/users/${userEmail}/messages/${msg.id}`).update({ isRead: true });
-      }
-      created++;
-    } catch (e) {
-      console.error('[Ticket Service] Error processing email:', e.message);
-      // do not mark as read so it can be retried next run
-    }
-  }
-
-  return { success: true, created, skipped };
-}
-
-// B) Route wrapper to process inbox on demand
+// B) Hàm đọc email từ inbox và tạo ticket (dùng Microsoft Graph API)
 exports.fetchEmailsAndCreateTickets = async (req, res) => {
   try {
-    const result = await processInboxOnce();
-    const status = result.success ? 200 : 500;
-    return res.status(status).json({ success: result.success, ...result });
-  } catch (error) {
-    console.error('Lỗi khi fetch email:', error);
-    return res.status(500).json({ success: false, message: error.message });
-  }
-};
+    console.log("📧 [Email] Đang đọc email từ inbox...");
 
-// B2) Peek inbox (debug: liệt kê nhanh 10 email gần nhất)
-exports.peekInbox = async (req, res) => {
-  try {
-    if (!credential || !graphClient) {
-      return res.status(500).json({ success: false, reason: 'graph_not_initialized' });
-    }
-
+    // Sử dụng /users/{EMAIL_USER} thay vì /me
     const userEmail = process.env.EMAIL_USER;
     const messages = await graphClient
       .api(`/users/${userEmail}/mailFolders/Inbox/messages`)
-      .select('id,subject,from,isRead,receivedDateTime')
-      .top(10)
-      .orderby('receivedDateTime desc')
+      .filter("isRead eq false") // Tương đương với UNSEEN trong IMAP
+      .select("subject,from,body") // Lấy các trường cần thiết
+      .expand("attachments")
+      .top(50)
       .get();
 
-    const list = (messages.value || []).map(m => ({
-      id: m.id,
-      subject: m.subject,
-      from: m.from?.emailAddress?.address,
-      isRead: m.isRead,
-      received: m.receivedDateTime
-    }));
+    // Nếu không có email mới, trả về ngay
+    if (!messages.value || messages.value.length === 0) {
+      console.log("📧 [Email] Không có email mới");
+      return res.status(200).json({ success: true, message: "Không có email mới." });
+    }
 
-    return res.status(200).json({ success: true, email: userEmail, count: list.length, list });
+    console.log(`📧 [Email] Tìm thấy ${messages.value.length} email chưa đọc`);
+
+    let processedCount = 0;
+
+    for (let msg of messages.value) {
+      const subject = msg.subject || "Email Support";
+      const from = msg.from?.emailAddress?.address || "";
+      const content = msg.body?.content || "";
+      const lowerSubject = subject.trim().toLowerCase();
+
+      // Bỏ qua email reply
+      if (lowerSubject.startsWith("re:") || lowerSubject.startsWith("trả lời:")) {
+        console.log(`⏭️  [Email] Bỏ qua email có subject: ${subject}`);
+        await graphClient
+          .api(`/users/${userEmail}/messages/${msg.id}`)
+          .update({ isRead: true });
+        continue;
+      }
+
+      const plainContent = convert(content, { wordwrap: 130 }); // Updated to use html-to-text
+
+      // Kiểm tra domain của người gửi
+      if (!from.endsWith("@wellspring.edu.vn")) {
+        console.log(`⏭️  [Email] Bỏ qua email từ ${from} vì không thuộc domain @wellspring.edu.vn`);
+        // Đánh dấu email là đã đọc để không xử lý lại
+        await graphClient
+          .api(`/users/${userEmail}/messages/${msg.id}`)
+          .update({ isRead: true });
+        continue; // Bỏ qua email này
+      }
+
+      console.log("📧 [Email] Đang xử lý email từ:", from, "với tiêu đề:", subject);
+
+      // Xử lý attachments
+      let attachments = [];
+      if (msg.hasAttachments && msg.attachments && msg.attachments.value && msg.attachments.value.length > 0) {
+        attachments = msg.attachments.value
+          .filter(att => att["@odata.type"] === "#microsoft.graph.fileAttachment")
+          .map(att => ({
+            filename: att.name,
+            url: `data:${att.contentType};base64,${att.contentBytes}`
+          }));
+      }
+
+      // Tìm user dựa trên email người gửi
+      let creatorUser = await User.findOne({ email: from });
+
+      // Nếu không tìm thấy user, tạo user tạm thời
+      if (!creatorUser) {
+        console.log(`👤 [Email] Không tìm thấy user với email ${from}, tạo user tạm thời...`);
+        creatorUser = await User.create({
+          email: from,
+          fullname: from.split("@")[0], // Lấy phần trước @ làm tên tạm
+          role: "user", // Gán role mặc định
+          password: "temporaryPassword", // Mật khẩu tạm (nên mã hóa trong thực tế)
+          provider: 'email',
+          active: true,
+          disabled: false
+        });
+        console.log("✅ [Email] Đã tạo user tạm:", creatorUser._id);
+      }
+
+      // Tạo ticket sử dụng helper từ ticketController
+      try {
+        const newTicket = await ticketController.createTicketHelper({
+          title: subject,
+          description: plainContent,
+          creatorId: creatorUser._id,
+          priority: "Medium",
+          files: attachments,  // Email attachments
+          bearerToken: req.headers.authorization?.replace('Bearer ', '') // Pass token for avatar fetching
+        });
+
+        console.log("✅ [Email] Đã tạo ticket từ email:", newTicket.ticketCode);
+        processedCount++;
+
+      } catch (ticketError) {
+        console.error(`❌ [Email] Lỗi tạo ticket từ email ${subject}:`, ticketError.message);
+      }
+
+      // Đánh dấu email là đã đọc
+      await graphClient
+        .api(`/users/${userEmail}/messages/${msg.id}`)
+        .update({ isRead: true });
+      console.log(`✅ [Email] Đã đánh dấu email ${msg.id} là đã đọc`);
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: `Đã xử lý ${processedCount} email và tạo ticket.`,
+      processedEmails: processedCount
+    });
+
   } catch (error) {
-    console.error('Lỗi khi peek inbox:', error);
+    console.error("❌ [Email] Lỗi khi fetch email:", error);
     return res.status(500).json({ success: false, message: error.message });
   }
 };
 
 // C) Hàm chạy định kỳ (dùng với cron job nếu cần)
-exports.processInboxOnce = processInboxOnce;
+exports.runEmailSync = async () => {
+  try {
+    console.log("🔄 [Email] Chạy email sync định kỳ...");
+    await exports.fetchEmailsAndCreateTickets({}); // Gọi hàm fetch mà không cần req/res
+    console.log("✅ [Email] Email sync hoàn thành");
+  } catch (error) {
+    console.error("❌ [Email] Lỗi đồng bộ email:", error);
+  }
+};
+
+// D) Hàm gửi email thông báo cho support team khi có ticket mới
+exports.sendNewTicketNotification = async (ticket) => {
+  try {
+    console.log("📧 [Email] Gửi thông báo ticket mới cho support team...");
+
+    // Lấy danh sách support team members
+    const supportMembers = await SupportTeamMember.find({ isActive: true })
+      .select('email fullname');
+
+    if (supportMembers.length === 0) {
+      console.log("⚠️  [Email] Không có support team members để gửi thông báo");
+      return;
+    }
+
+    const transporter = await createTransporter();
+
+    // Gửi email cho từng member
+    const emailPromises = supportMembers.map(async (member) => {
+      const mailOptions = {
+        from: `"Hệ thống Support" <${process.env.EMAIL_USER}>`,
+        to: member.email,
+        subject: `[Ticket Mới] #${ticket.ticketCode} - ${ticket.title}`,
+        text: `Xin chào ${member.fullname},
+
+Có ticket mới cần hỗ trợ:
+- Mã ticket: ${ticket.ticketCode}
+- Tiêu đề: ${ticket.title}
+- Ưu tiên: ${ticket.priority}
+- Người tạo: ${ticket.creator?.fullname || ticket.creator?.email || 'Unknown'}
+
+Vui lòng đăng nhập hệ thống để xử lý ticket.
+
+Trân trọng,
+Hệ thống Support`,
+        html: `<p>Xin chào <strong>${member.fullname}</strong>,</p>
+
+<p>Có ticket mới cần hỗ trợ:</p>
+<ul>
+  <li><strong>Mã ticket:</strong> ${ticket.ticketCode}</li>
+  <li><strong>Tiêu đề:</strong> ${ticket.title}</li>
+  <li><strong>Ưu tiên:</strong> ${ticket.priority}</li>
+  <li><strong>Người tạo:</strong> ${ticket.creator?.fullname || ticket.creator?.email || 'Unknown'}</li>
+</ul>
+
+<p>Vui lòng <a href="${process.env.FRONTEND_URL || 'https://admin.sis.wellspring.edu.vn'}/tickets">đăng nhập hệ thống</a> để xử lý ticket.</p>
+
+<p>Trân trọng,<br>Hệ thống Support</p>`
+      };
+
+      return transporter.sendMail(mailOptions);
+    });
+
+    await Promise.all(emailPromises);
+    console.log(`✅ [Email] Đã gửi thông báo ticket mới cho ${supportMembers.length} thành viên support team`);
+
+  } catch (error) {
+    console.error("❌ [Email] Lỗi gửi thông báo ticket mới:", error);
+  }
+};

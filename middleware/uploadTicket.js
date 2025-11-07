@@ -1,49 +1,73 @@
-const multer = require('multer');
-const path = require('path');
-const fs = require('fs');
+const multer = require("multer");
+const path = require("path");
+const fs = require("fs");
 
-// Configure storage for ticket attachments
+// Định nghĩa đường dẫn thư mục upload
+const uploadDir = "uploads/Tickets";
+
+// Kiểm tra và tạo thư mục nếu chưa tồn tại
+if (!fs.existsSync(uploadDir)) {
+  fs.mkdirSync(uploadDir, { recursive: true });
+}
+
+// Cấu hình storage để lưu file
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    // Determine destination based on context
-    let destFolder = 'uploads/Tickets/temp'; // Default: temporary folder
-    
-    // If ticketId is provided (update scenario), use ticket folder
-    if (req.params.ticketId) {
-      destFolder = `uploads/Tickets/${req.params.ticketId}`;
-    }
-    // For create, we'll use temp folder and move later
-    
-    // Create folder if it doesn't exist
-    if (!fs.existsSync(destFolder)) {
-      fs.mkdirSync(destFolder, { recursive: true });
-    }
-    
-    cb(null, destFolder);
+    cb(null, uploadDir); // Lưu file vào thư mục đã kiểm tra
   },
   filename: (req, file, cb) => {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    cb(null, file.fieldname + '-' + uniqueSuffix + path.extname(file.originalname));
-  }
+    cb(null, Date.now() + "-" + file.originalname);
+  },
 });
 
-// File filter
+// Cho phép upload nhiều loại file hơn (như workspace-backend)
 const fileFilter = (req, file, cb) => {
-  const allowedTypes = ['image/jpeg', 'image/png', 'image/gif', 'application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'text/plain', 'application/zip'];
-  
-  if (allowedTypes.includes(file.mimetype)) {
-    cb(null, true);
+  const allowedTypes = /jpeg|jpg|png|gif|pdf|doc|docx|txt|zip/;
+  const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
+  const mimetype = allowedTypes.test(file.mimetype);
+
+  if (extname && mimetype) {
+    return cb(null, true);
   } else {
-    cb(new Error('File type not allowed'), false);
+    cb(new Error("Chỉ chấp nhận file: jpg, jpeg, png, gif, pdf, doc, docx, txt, zip"));
   }
 };
 
+// Cấu hình upload: tối đa 15 file, mỗi file 10MB (như config.env.example)
 const upload = multer({
-  storage: storage,
-  fileFilter: fileFilter,
+  storage,
   limits: {
-    fileSize: 10 * 1024 * 1024 // 10MB
-  }
+    fileSize: parseInt(process.env.MAX_FILE_SIZE) || 10 * 1024 * 1024, // 10MB default
+    files: 15 // Max 15 files
+  },
+  fileFilter,
 });
 
-module.exports = upload;
+// Middleware để handle errors
+const handleUploadError = (error, req, res, next) => {
+  if (error instanceof multer.MulterError) {
+    if (error.code === 'LIMIT_FILE_SIZE') {
+      return res.status(400).json({
+        success: false,
+        message: `File quá lớn. Kích thước tối đa: ${process.env.MAX_FILE_SIZE || '10MB'}`
+      });
+    }
+    if (error.code === 'LIMIT_FILE_COUNT') {
+      return res.status(400).json({
+        success: false,
+        message: 'Quá nhiều file. Tối đa 15 file được phép.'
+      });
+    }
+  }
+
+  if (error.message.includes('Chỉ chấp nhận file')) {
+    return res.status(400).json({
+      success: false,
+      message: error.message
+    });
+  }
+
+  next(error);
+};
+
+module.exports = { upload, handleUploadError };

@@ -1,6 +1,11 @@
 const redisClient = require('../config/redis');
 const axios = require('axios');
+const { Expo } = require('expo-server-sdk');
+const User = require('../models/Users');
 require('dotenv').config({ path: './config.env' });
+
+// Khởi tạo instance của Expo
+let expo = new Expo();
 
 class NotificationService {
   constructor() {
@@ -20,6 +25,133 @@ class NotificationService {
     });
     
     this.setupInterceptors();
+  }
+
+  /**
+   * Gửi push notifications đến các thiết bị
+   * @param {Array} pushTokens - Danh sách token thiết bị
+   * @param {String} title - Tiêu đề thông báo
+   * @param {String} body - Nội dung thông báo
+   * @param {Object} data - Dữ liệu bổ sung
+   */
+  async sendPushNotifications(pushTokens, title, body, data = {}) {
+    try {
+      console.log(`📱 [Notification] Sending push notifications to ${pushTokens.length} devices`);
+
+      // Tạo danh sách messages để gửi
+      let messages = [];
+
+      // Kiểm tra và lọc các token hợp lệ
+      for (let pushToken of pushTokens) {
+        if (!Expo.isExpoPushToken(pushToken)) {
+          console.error(`❌ [Notification] Push token ${pushToken} không phải là token Expo hợp lệ`);
+          continue;
+        }
+
+        // Thêm thông báo vào danh sách
+        messages.push({
+          to: pushToken,
+          sound: 'default',
+          title,
+          body,
+          data,
+        });
+      }
+
+      if (messages.length === 0) {
+        console.log('⚠️  [Notification] No valid push tokens found');
+        return [];
+      }
+
+      // Chia thành chunks để tránh vượt quá giới hạn của Expo
+      let chunks = expo.chunkPushNotifications(messages);
+      let tickets = [];
+
+      // Gửi từng chunk
+      for (let chunk of chunks) {
+        try {
+          let ticketChunk = await expo.sendPushNotificationsAsync(chunk);
+          tickets.push(...ticketChunk);
+          console.log(`✅ [Notification] Sent chunk of ${chunk.length} notifications`);
+        } catch (error) {
+          console.error('❌ [Notification] Lỗi khi gửi chunk:', error);
+        }
+      }
+
+      return tickets;
+    } catch (error) {
+      console.error('❌ [Notification] Lỗi trong quá trình gửi push notifications:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Lấy push tokens của user
+   * @param {String} userId - ID của user
+   * @returns {Array} Danh sách push tokens
+   */
+  async getUserPushTokens(userId) {
+    try {
+      const user = await User.findById(userId).select('deviceToken');
+      return user && user.deviceToken ? [user.deviceToken] : [];
+    } catch (error) {
+      console.error(`❌ [Notification] Error getting push tokens for user ${userId}:`, error);
+      return [];
+    }
+  }
+
+  /**
+   * Gửi thông báo cho user với cả push notification và service notification
+   * @param {String} userId - ID của user
+   * @param {String} title - Tiêu đề
+   * @param {String} body - Nội dung
+   * @param {Object} data - Dữ liệu bổ sung
+   * @param {String} type - Loại thông báo
+   */
+  async sendNotificationToUser(userId, title, body, data = {}, type = 'system') {
+    try {
+      console.log(`📢 [Notification] Sending notification to user ${userId}: ${title}`);
+
+      // 1. Gửi push notification
+      const pushTokens = await this.getUserPushTokens(userId);
+      if (pushTokens.length > 0) {
+        await this.sendPushNotifications(pushTokens, title, body, data);
+      }
+
+      // 2. Gửi qua notification service (nếu có)
+      if (this.enabled) {
+        try {
+          const notificationData = {
+            type,
+            title,
+            body,
+            recipients: [userId],
+            data,
+            priority: this.getPriorityLevel(data.priority || 'medium'),
+            sound: 'default',
+            badge: 1
+          };
+
+          await this.api.post('/api/notifications/send', notificationData);
+          console.log(`✅ [Notification] Sent service notification to user ${userId}`);
+        } catch (serviceError) {
+          console.warn(`⚠️  [Notification] Service notification failed, continuing with push only:`, serviceError.message);
+        }
+      }
+
+      // 3. Publish to Redis for real-time updates
+      await this.publishNotificationEvent('notification_sent', {
+        userId,
+        title,
+        body,
+        data,
+        type,
+        timestamp: new Date()
+      });
+
+    } catch (error) {
+      console.error(`❌ [Notification] Error sending notification to user ${userId}:`, error);
+    }
   }
 
   setupInterceptors() {

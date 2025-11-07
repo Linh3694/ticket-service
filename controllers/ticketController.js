@@ -1,6 +1,8 @@
 const Ticket = require("../models/Ticket");
 const SupportTeam = require("../models/SupportTeam");
+const SupportTeamMember = require("../models/SupportTeamMember");
 const notificationService = require('../services/notificationService');
+const emailController = require('./emailController');
 const { TICKET_LOGS, SUBTASK_LOGS, OTHER_LOGS, normalizeVietnameseName, translateStatus } = require('../utils/logFormatter');
 const mongoose = require("mongoose");
 const axios = require('axios');
@@ -403,6 +405,22 @@ exports.createTicket = async (req, res) => {
     console.log(`📋 [createTicket] Before response:`);
     console.log(`   assignedTo field: ${JSON.stringify(newTicket.assignedTo)}`);
     console.log(`   creator field: ${JSON.stringify(newTicket.creator)}`);
+
+    // Gửi thông báo cho support team
+    try {
+      await notificationService.sendNewTicketNotification(newTicket);
+      console.log(`📢 [createTicket] Sent notifications for new ticket: ${newTicket.ticketCode}`);
+    } catch (notificationError) {
+      console.warn(`⚠️  [createTicket] Failed to send notifications:`, notificationError.message);
+    }
+
+    // Gửi email thông báo cho support team (nếu được bật)
+    try {
+      await emailController.sendNewTicketNotification(newTicket);
+      console.log(`📧 [createTicket] Sent email notifications for new ticket: ${newTicket.ticketCode}`);
+    } catch (emailError) {
+      console.warn(`⚠️  [createTicket] Failed to send email notifications:`, emailError.message);
+    }
 
     res.status(201).json({
       success: true,
