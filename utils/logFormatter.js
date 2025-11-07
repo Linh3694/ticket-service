@@ -6,9 +6,14 @@
 // Helper function to normalize Vietnamese names
 function normalizeVietnameseName(fullname) {
   if (!fullname) return fullname;
-  // For Vietnamese names, keep the original order (Họ + Tên đệm + Tên)
-  // Example: "Nguyễn Hải Linh" should stay "Nguyễn Hải Linh"
-  return fullname.trim();
+  const parts = fullname.trim().split(' ');
+  if (parts.length <= 1) return fullname;
+
+  // If name appears to be in "Tên Họ Đệm" format, convert to "Họ Đệm Tên"
+  // Example: "Linh Nguyễn Hải" -> "Nguyễn Hải Linh"
+  const firstName = parts[0]; // Linh
+  const rest = parts.slice(1); // [Nguyễn, Hải]
+  return rest.join(' ') + ' ' + firstName; // "Nguyễn Hải Linh"
 }
 
 // Helper function to translate status to Vietnamese

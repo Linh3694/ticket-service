@@ -280,7 +280,7 @@ exports.createTicket = async (req, res) => {
     // Log ticket creation
     await logTicketHistory(
       newTicket._id,
-      TICKET_LOGS.TICKET_CREATED(creatorName),
+      TICKET_LOGS.TICKET_CREATED(normalizeVietnameseName(creatorName)),
       userId
     );
 
@@ -294,7 +294,7 @@ exports.createTicket = async (req, res) => {
       // Log auto assignment
       await logTicketHistory(
         newTicket._id,
-        TICKET_LOGS.AUTO_ASSIGNED(assignedName),
+        TICKET_LOGS.AUTO_ASSIGNED(normalizeVietnameseName(assignedName)),
         userId
       );
     }
@@ -570,7 +570,7 @@ exports.updateTicket = async (req, res) => {
 
     // 📝 Log status change
     if (updates.status && updates.status !== ticket.status) {
-      const userName = req.user.fullname || req.user.email;
+      const userName = normalizeVietnameseName(req.user.fullname) || req.user.email;
       ticket.history.push({
         timestamp: new Date(),
         action: TICKET_LOGS.STATUS_CHANGED(previousStatus, updates.status, userName),
@@ -590,7 +590,7 @@ exports.updateTicket = async (req, res) => {
 
     // 📝 Log other field changes
     if (updates.title && updates.title !== ticket.title) {
-      const userName = req.user.fullname || req.user.email;
+      const userName = normalizeVietnameseName(req.user.fullname) || req.user.email;
       ticket.history.push({
         timestamp: new Date(),
         action: OTHER_LOGS.FIELD_UPDATED('tiêu đề', userName),
@@ -599,7 +599,7 @@ exports.updateTicket = async (req, res) => {
     }
 
     if (updates.description && updates.description !== ticket.description) {
-      const userName = req.user.fullname || req.user.email;
+      const userName = normalizeVietnameseName(req.user.fullname) || req.user.email;
       ticket.history.push({
         timestamp: new Date(),
         action: OTHER_LOGS.FIELD_UPDATED('mô tả', userName),
@@ -669,7 +669,7 @@ exports.deleteTicket = async (req, res) => {
     ticket.updatedAt = new Date();
 
     // Log history
-    const userName = req.user.fullname || req.user.email;
+    const userName = normalizeVietnameseName(req.user.fullname) || req.user.email;
     ticket.history.push({
       timestamp: new Date(),
       action: TICKET_LOGS.TICKET_CANCELLED(userName),
@@ -716,7 +716,7 @@ exports.addFeedback = async (req, res) => {
 
       ticket.history.push({
         timestamp: new Date(),
-        action: FEEDBACK_LOGS.FEEDBACK_INITIAL(req.user.fullname, rating, comment),
+        action: FEEDBACK_LOGS.FEEDBACK_INITIAL(normalizeVietnameseName(req.user.fullname), rating, comment),
         user: req.user._id,
       });
 
@@ -742,7 +742,7 @@ exports.addFeedback = async (req, res) => {
 
       ticket.history.push({
         timestamp: new Date(),
-        action: FEEDBACK_LOGS.FEEDBACK_UPDATED(req.user.fullname, oldRating, rating, comment),
+        action: FEEDBACK_LOGS.FEEDBACK_UPDATED(normalizeVietnameseName(req.user.fullname), oldRating, rating, comment),
         user: req.user._id,
       });
     }
@@ -823,7 +823,7 @@ exports.escalateTicket = async (req, res) => {
     ticket.escalateLevel += 1;
     ticket.history.push({
       timestamp: new Date(),
-      action: OTHER_LOGS.TICKET_ESCALATED(req.user.fullname, ticket.escalateLevel),
+      action: OTHER_LOGS.TICKET_ESCALATED(normalizeVietnameseName(req.user.fullname), ticket.escalateLevel),
       user: req.user._id,
     });
 
@@ -1001,7 +1001,7 @@ exports.addSubTask = async (req, res) => {
 
     ticket.history.push({
       timestamp: new Date(),
-      action: SUBTASK_LOGS.SUBTASK_CREATED(req.user.fullname, title, finalStatus),
+      action: SUBTASK_LOGS.SUBTASK_CREATED(normalizeVietnameseName(req.user.fullname), title, finalStatus),
       user: req.user._id,
     });
 
@@ -1042,7 +1042,7 @@ exports.updateSubTaskStatus = async (req, res) => {
       ticket.history.push({
         timestamp: new Date(),
         action: SUBTASK_LOGS.SUBTASK_STATUS_CHANGED(
-          req.user.fullname,
+          normalizeVietnameseName(req.user.fullname),
           subTask.title,
           translateStatus(subTask.status),
           translateStatus(status)
@@ -1079,7 +1079,7 @@ exports.deleteSubTask = async (req, res) => {
 
     ticket.history.push({
       timestamp: new Date(),
-      action: SUBTASK_LOGS.SUBTASK_DELETED(req.user.fullname, subTask.title),
+      action: SUBTASK_LOGS.SUBTASK_DELETED(normalizeVietnameseName(req.user.fullname), subTask.title),
       user: req.user._id,
     });
 
@@ -1414,7 +1414,7 @@ async function createTicketHelper({ title, description, creatorId, fallbackCreat
     history: [
       {
         timestamp: new Date(),
-        action: TICKET_LOGS.MANUAL_ASSIGNED(creatorName, leastAssignedUser.fullname),
+        action: TICKET_LOGS.MANUAL_ASSIGNED(normalizeVietnameseName(creatorName), normalizeVietnameseName(leastAssignedUser.fullname)),
         user: creatorObjectId,
       },
     ],
@@ -1506,7 +1506,7 @@ exports.assignTicketToMe = async (req, res) => {
     };
 
     // Log history
-    const assigneeName = req.user.fullname;
+    const assigneeName = normalizeVietnameseName(req.user.fullname);
     const previousName = previousAssignedTo;
     console.log(`📝 [assignTicketToMe] Assignee: "${assigneeName}", Previous: "${previousName}"`);
 
@@ -1584,7 +1584,7 @@ exports.cancelTicketWithReason = async (req, res) => {
     ticket.updatedAt = new Date();
 
     // Log history
-    const userName = req.user.fullname || req.user.email;
+    const userName = normalizeVietnameseName(req.user.fullname) || req.user.email;
     ticket.history.push({
       timestamp: new Date(),
       action: TICKET_LOGS.TICKET_CANCELLED(userName, cancelReason.trim()),
@@ -1692,7 +1692,7 @@ exports.acceptFeedback = async (req, res) => {
     // Log history
     ticket.history.push({
       timestamp: new Date(),
-      action: FEEDBACK_LOGS.FEEDBACK_ACCEPTED(req.user.fullname, rating),
+      action: FEEDBACK_LOGS.FEEDBACK_ACCEPTED(normalizeVietnameseName(req.user.fullname), rating),
       user: userId
     });
 
@@ -1827,7 +1827,7 @@ exports.reopenTicket = async (req, res) => {
     // Log history
     ticket.history.push({
       timestamp: new Date(),
-      action: TICKET_LOGS.TICKET_REOPENED(req.user.fullname, previousStatus),
+      action: TICKET_LOGS.TICKET_REOPENED(normalizeVietnameseName(req.user.fullname), previousStatus),
       user: userId
     });
 
