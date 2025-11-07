@@ -517,7 +517,10 @@ exports.getTicketHistory = async (req, res) => {
         _id: entry._id,
         timestamp: entry.timestamp,
         action: entry.action,
-        user: entry.user
+        user: entry.user ? {
+          ...entry.user.toObject(),
+          fullname: normalizeVietnameseName(entry.user.fullname) // Normalize tên để đồng nhất
+        } : entry.user
       }));
 
     console.log(`✅ [getTicketHistory] Found ${sortedHistory.length} history entries for ticket ${ticketId}`);
