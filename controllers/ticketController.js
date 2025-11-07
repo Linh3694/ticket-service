@@ -519,11 +519,7 @@ exports.getTicketHistory = async (req, res) => {
         action: entry.action,
         user: entry.user ? {
           ...entry.user.toObject(),
-          fullname: (() => {
-            const normalized = normalizeVietnameseName(entry.user.fullname);
-            console.log(`👤 [populateUser] "${entry.user.fullname}" -> "${normalized}"`);
-            return normalized;
-          })() // Normalize tên để đồng nhất
+          fullname: normalizeVietnameseName(entry.user.fullname) // Normalize tên để đồng nhất
         } : entry.user
       }));
 
