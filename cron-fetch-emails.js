@@ -10,7 +10,7 @@ require('dotenv').config({ path: './config.env' });
 
 // Configuration
 const TICKET_SERVICE_URL = process.env.TICKET_SERVICE_URL || 'http://localhost:5001';
-const CRON_INTERVAL = 5 * 60 * 1000; // 5 minutes in milliseconds
+const CRON_INTERVAL = 1 * 60 * 1000; // 1 minute in milliseconds
 
 /**
  * Fetch emails and create tickets
