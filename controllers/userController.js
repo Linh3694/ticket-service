@@ -81,7 +81,7 @@ async function getAllFrappeUsers(token) {
         `${FRAPPE_API_URL}/api/resource/User`,
         {
           params: {
-            fields: JSON.stringify(['name', 'email', 'full_name', 'user_image', 'enabled', 'location', 'roles', 'docstatus']),
+            fields: JSON.stringify(['name', 'email', 'full_name', 'user_image', 'enabled', 'disabled', 'location', 'roles', 'docstatus', 'user_type']),
             limit_start: start,
             limit_page_length: pageLength,
             order_by: 'name asc'
@@ -116,9 +116,13 @@ async function getAllFrappeUsers(token) {
         hasMore = false;
       } else {
         // Filter enabled users only (double check)
+        // In Frappe, users are enabled when disabled=0 or disabled=false
         const enabledUsers = userList.filter(user => {
-          const isEnabled = user.enabled === 1 || user.enabled === "1" || user.enabled === true;
-          return isEnabled;
+          // Check if user is not disabled (disabled=0, "0", false, or undefined/null)
+          const isNotDisabled = user.disabled === 0 || user.disabled === "0" || user.disabled === false || user.disabled === null || user.disabled === undefined;
+          // Also check user_type - only System Users are typically enabled for login
+          const isSystemUser = user.user_type === 'System User';
+          return isNotDisabled && isSystemUser;
         });
 
         console.log(`   ✅ Filtered ${enabledUsers.length} enabled users from ${userList.length} total users`);
@@ -177,9 +181,9 @@ async function getAllFrappeUsers(token) {
 // Format Frappe user → Users model
 function formatFrappeUser(frappeUser) {
   const frappe_roles = frappeUser.roles?.map(r => r.role) || [];
-  // Frappe có thể gửi enabled là string "1" hoặc number 1, cần normalize
-  const isEnabled = frappeUser.enabled === 1 || frappeUser.enabled === "1" || frappeUser.enabled === true;
-  
+  // In Frappe, users are enabled when disabled=0/"0"/false or disabled is null/undefined
+  const isEnabled = frappeUser.disabled === 0 || frappeUser.disabled === "0" || frappeUser.disabled === false || frappeUser.disabled === null || frappeUser.disabled === undefined;
+
   return {
     email: frappeUser.email,
     fullname: frappeUser.full_name || frappeUser.name,
@@ -385,7 +389,7 @@ exports.debugFetchUsers = async (req, res) => {
       `${FRAPPE_API_URL}/api/resource/User`,
       {
         params: {
-          fields: JSON.stringify(['name', 'email', 'full_name', 'user_image', 'enabled', 'location', 'roles', 'docstatus']),
+          fields: JSON.stringify(['name', 'email', 'full_name', 'user_image', 'enabled', 'location', 'roles', 'docstatus', 'disabled', 'user_type', 'last_login', 'creation', 'modified']),
           limit_start: 0,
           limit_page_length: 10, // Only first 10 users
           order_by: 'name asc'
@@ -402,34 +406,51 @@ exports.debugFetchUsers = async (req, res) => {
 
     console.log(`📦 Found ${userList.length} users (total_count: ${totalCount})`);
 
-    // Analyze enabled field
-    const enabledStats = {
+    // Analyze user fields
+    const fieldStats = {
       total: userList.length,
+      // enabled field
       enabled_true: userList.filter(u => u.enabled === true).length,
       enabled_1_number: userList.filter(u => u.enabled === 1).length,
       enabled_1_string: userList.filter(u => u.enabled === "1").length,
       enabled_0: userList.filter(u => u.enabled === 0 || u.enabled === "0" || u.enabled === false).length,
       enabled_null: userList.filter(u => u.enabled === null || u.enabled === undefined).length,
+      // disabled field (might be the opposite)
+      disabled_true: userList.filter(u => u.disabled === true).length,
+      disabled_1_number: userList.filter(u => u.disabled === 1).length,
+      disabled_1_string: userList.filter(u => u.disabled === "1").length,
+      disabled_0: userList.filter(u => u.disabled === 0 || u.disabled === "0" || u.disabled === false).length,
+      disabled_null: userList.filter(u => u.disabled === null || u.disabled === undefined).length,
+      // docstatus
       docstatus_0: userList.filter(u => u.docstatus === 0).length,
       docstatus_1: userList.filter(u => u.docstatus === 1).length,
-      docstatus_2: userList.filter(u => u.docstatus === 2).length
+      docstatus_2: userList.filter(u => u.docstatus === 2).length,
+      // user_type
+      user_type_null: userList.filter(u => !u.user_type).length,
+      user_type_system: userList.filter(u => u.user_type === 'System User').length,
+      user_type_website: userList.filter(u => u.user_type === 'Website User').length
     };
 
-    console.log('📊 Enabled field analysis:', enabledStats);
+    console.log('📊 Field analysis:', fieldStats);
 
     const sampleUsers = userList.slice(0, 5).map(user => ({
       email: user.email,
       name: user.name,
       enabled: user.enabled,
+      disabled: user.disabled,
       enabled_type: typeof user.enabled,
+      disabled_type: typeof user.disabled,
       docstatus: user.docstatus,
-      full_name: user.full_name
+      user_type: user.user_type,
+      full_name: user.full_name,
+      creation: user.creation,
+      modified: user.modified
     }));
 
     res.status(200).json({
       success: true,
       message: 'Debug fetch completed',
-      stats: enabledStats,
+      stats: fieldStats,
       sample_users: sampleUsers,
       total_count: totalCount
     });
@@ -473,8 +494,8 @@ exports.syncUserByEmail = async (req, res) => {
       });
     }
     
-    // Frappe có thể gửi enabled là string "1" hoặc number 1, cần normalize
-    const isEnabled = frappeUser.enabled === 1 || frappeUser.enabled === "1" || frappeUser.enabled === true;
+    // In Frappe, users are enabled when disabled=0/"0"/false or disabled is null/undefined
+    const isEnabled = frappeUser.disabled === 0 || frappeUser.disabled === "0" || frappeUser.disabled === false || frappeUser.disabled === null || frappeUser.disabled === undefined;
     if (!isEnabled) {
       return res.status(400).json({
         success: false,
@@ -553,11 +574,11 @@ exports.webhookUserChanged = async (req, res) => {
     }
     
     if (actualEvent === 'insert' || actualEvent === 'update' || actualEvent === 'after_insert' || actualEvent === 'on_update') {
-      // Chỉ sync enabled users
-      // Frappe có thể gửi enabled là string "1" hoặc number 1, cần normalize
-      const isEnabled = doc.enabled === 1 || doc.enabled === "1" || doc.enabled === true;
+      // Chỉ sync enabled users (not disabled)
+      // In Frappe, users are enabled when disabled=0/"0"/false or disabled is null/undefined
+      const isEnabled = doc.disabled === 0 || doc.disabled === "0" || doc.disabled === false || doc.disabled === null || doc.disabled === undefined;
       if (!isEnabled) {
-        console.log(`⏭️  Skipping disabled user: ${doc.name} (enabled: ${doc.enabled}, type: ${typeof doc.enabled})`);
+        console.log(`⏭️  Skipping disabled user: ${doc.name} (disabled: ${doc.disabled}, type: ${typeof doc.disabled})`);
         return res.status(200).json({
           success: true,
           message: 'User is disabled, skipped'
