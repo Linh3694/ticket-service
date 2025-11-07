@@ -6,14 +6,24 @@
 // Helper function to normalize Vietnamese names
 function normalizeVietnameseName(fullname) {
   if (!fullname) return fullname;
-  const parts = fullname.trim().split(' ');
+  const parts = fullname.trim().split(' ').filter(word => word.length > 0);
   if (parts.length <= 1) return fullname;
 
-  // If name appears to be in "Tên Họ Đệm" format, convert to "Họ Đệm Tên"
-  // Example: "Linh Nguyễn Hải" -> "Nguyễn Hải Linh"
-  const firstName = parts[0]; // Linh
-  const rest = parts.slice(1); // [Nguyễn, Hải]
-  return rest.join(' ') + ' ' + firstName; // "Nguyễn Hải Linh"
+  // Danh sách họ Việt Nam phổ biến
+  const vietnameseSurnames = ['Nguyễn', 'Trần', 'Lê', 'Phạm', 'Hoàng', 'Huỳnh', 'Phan', 'Vũ', 'Võ', 'Đặng', 'Bùi', 'Đỗ', 'Hồ', 'Ngô', 'Dương', 'Lý'];
+
+  // Tìm họ (surname) trong tên và sắp xếp lại thành format "Họ Đệm Tên"
+  for (let i = 0; i < parts.length; i++) {
+    if (vietnameseSurnames.includes(parts[i])) {
+      // Nếu tìm thấy họ ở vị trí i, thì Họ + Đệm + Tên
+      const surname = parts[i];
+      const rest = parts.slice(0, i).concat(parts.slice(i + 1));
+      return surname + ' ' + rest.join(' ');
+    }
+  }
+
+  // Nếu không tìm thấy họ trong danh sách, giữ nguyên format gốc
+  return fullname;
 }
 
 // Helper function to translate status to Vietnamese
