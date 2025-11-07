@@ -9,6 +9,55 @@ const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
 
+// Import User model for getTechnicalUsers
+const User = require("../models/Users");
+
+/**
+ * Get technical users for ticket assignment
+ * Returns users with technical/IT roles
+ */
+async function getTechnicalUsers(token = null) {
+  try {
+    // First try to get from SupportTeamMember collection (preferred)
+    const supportMembers = await SupportTeamMember.find({
+      isActive: true,
+      roles: { $in: ['Overall', 'Software', 'Network', 'Camera System', 'Bell System'] }
+    }).populate('userId').lean();
+
+    if (supportMembers.length > 0) {
+      return supportMembers.map(member => ({
+        _id: member.userId._id,
+        email: member.email,
+        fullname: member.fullname,
+        name: member.userId?.name || member.fullname,
+        disabled: member.userId?.disabled || false
+      }));
+    }
+
+    // Fallback: get users with technical roles from User collection
+    const technicalUsers = await User.find({
+      active: true,
+      disabled: { $ne: true },
+      $or: [
+        { role: { $in: ['technical', 'superadmin'] } },
+        { roles: { $in: ['SIS IT', 'IT Helpdesk', 'System Manager'] } }
+      ]
+    }).lean();
+
+    return technicalUsers.map(user => ({
+      _id: user._id,
+      email: user.email,
+      fullname: user.fullname,
+      name: user.fullname,
+      disabled: user.disabled
+    }));
+
+  } catch (error) {
+    console.error('❌ Error getting technical users:', error);
+    return [];
+  }
+}
+
 // Frappe API configuration
 const FRAPPE_API_URL = process.env.FRAPPE_API_URL || 'https://admin.sis.wellspring.edu.vn';
 
