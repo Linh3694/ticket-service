@@ -63,121 +63,35 @@ async function getFrappeUserDetail(userEmail, token) {
   }
 }
 
-// Fetch enabled users từ Frappe (chỉ lấy users đang active)
+// Fetch enabled users từ Frappe (sử dụng custom endpoint)
 async function getAllFrappeUsers(token) {
   try {
     console.log('🔍 [Sync] Fetching all enabled users from Frappe...');
 
-    // Fetch với limit cao (2500 - theo site config)
-    const allUsers = [];
-    const seenEmails = new Set();
-    let start = 0;
-    const pageLength = 2500;
-    let hasMore = true;
-    const maxPages = 10; // Max 10 pages (25000 users)
-    let pageCount = 0;
-
-    while (hasMore && pageCount < maxPages) {
-      pageCount++;
-      const listResponse = await axios.post(
-        `${FRAPPE_API_URL}/api/method/frappe.client.get_list`,
-        qs.stringify({
-          doctype: "User",
-          fields: JSON.stringify([
-            "name", "email", "full_name", "first_name", "middle_name", "last_name",
-            "user_image", "enabled", "disabled", "location", "department",
-            "job_title", "designation", "employee_code", "microsoft_id",
-            "roles", "docstatus", "user_type"
-          ]),
-          filters: JSON.stringify([["enabled", "=", 1]]),
-          limit_start: start,
-          limit_page_length: pageLength,
-          order_by: "name asc"
-        }),
-        {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/x-www-form-urlencoded'
-          }
-        }
-      );
-
-      // frappe.client.get_list trả về data trong "message" field
-      const userList = listResponse.data.message || listResponse.data.data || [];
-
-      if (userList.length === 0) {
-        hasMore = false;
-      } else {
-        // Detect duplicate data (infinite loop protection)
-        let newUsersCount = 0;
-        for (const user of userList) {
-          const email = user.email || user.name;
-          if (email && !seenEmails.has(email)) {
-            seenEmails.add(email);
-            newUsersCount++;
-          }
-        }
-        
-        if (newUsersCount === 0) {
-          console.log(`   ⚠️  Page ${pageCount}: All duplicates, stopping pagination`);
-          hasMore = false;
-          break;
-        }
-        
-        // Filter enabled users (bao gồm cả System Users và Website Users)
-        // Priority: user_type > enabled field > disabled field > docstatus
-        const enabledUsers = userList.filter(user => {
-          // Chỉ lấy System Users và Website Users (loại bỏ Guest và các loại khác)
-          if (user.user_type && user.user_type !== 'System User' && user.user_type !== 'Website User') {
-            return false;
-          }
-          
-          // Check disabled field first (nếu disabled = true thì chắc chắn không enabled)
-          if (user.disabled === true || user.disabled === 1 || user.disabled === "1") {
-            return false;
-          }
-          
-          // Check enabled field (ưu tiên cao nhất)
-          if (user.enabled !== undefined && user.enabled !== null) {
-            const isEnabled = user.enabled === 1 || user.enabled === true || user.enabled === "1";
-            return isEnabled;
-          }
-          
-          // Fallback: check docstatus (0 = active/draft, 1 = submitted, 2 = cancelled)
-          if (user.docstatus !== undefined && user.docstatus !== null) {
-            return user.docstatus === 0; // Only active/draft users
-          }
-          
-          // Nếu không có thông tin nào về status, mặc định là enabled (tránh filter quá strict)
-          // Điều này có thể xảy ra nếu API không trả về các field này
-          return true;
-        });
-
-        allUsers.push(...enabledUsers);
-
-        // Check if we've reached the last page
-        if (userList.length === 0) {
-          hasMore = false;
-        } else {
-          start += userList.length;
+    // Call custom endpoint để lấy ALL users trong 1 request
+    const response = await axios.get(
+      `${FRAPPE_API_URL}/api/method/erp.api.erp_common_user.user_sync.get_all_enabled_users`,
+      {
+        headers: {
+          'Authorization': `Bearer ${token}`
         }
       }
-      
-      // Progress log every 100 users
-      if (allUsers.length > 0 && allUsers.length % 100 === 0) {
-        console.log(`   📊 Progress: ${allUsers.length} users synced...`);
-      }
+    );
+
+    const result = response.data.message || response.data;
+    
+    if (!result.success) {
+      throw new Error(result.error || result.message || 'Failed to fetch users');
     }
 
-    if (pageCount >= maxPages) {
-      console.log(`⚠️  Reached max pages limit (${maxPages} pages)`);
-    }
+    const users = result.data || [];
+    const userTypeStats = result.user_types || {};
 
-    console.log(`✅ Found ${allUsers.length} enabled users from Frappe`);
+    console.log(`✅ Found ${users.length} enabled users from Frappe`);
+    console.log(`   📊 User Types: System=${userTypeStats['System User'] || 0}, Website=${userTypeStats['Website User'] || 0}, Other=${userTypeStats['Other'] || 0}`);
 
-    // Không cần fetch detail nữa - list API đã đủ thông tin cần thiết
-    // Roles thường empty và Has Role API bị 403, không cần thiết cho sync
-    return allUsers.map(user => ({
+    // Return users với format chuẩn
+    return users.map(user => ({
       name: user.name,
       email: user.email || user.name,
       full_name: user.full_name,
@@ -195,7 +109,7 @@ async function getAllFrappeUsers(token) {
       microsoft_id: user.microsoft_id,
       docstatus: user.docstatus,
       user_type: user.user_type,
-      roles: [] // List API không trả về roles, và Has Role API bị 403
+      roles: [] // Roles không dùng trong ticket service
     }));
   } catch (error) {
     console.error('❌ Error fetching Frappe users:', error.message);
