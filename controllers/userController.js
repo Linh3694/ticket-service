@@ -69,11 +69,15 @@ async function getAllFrappeUsers(token) {
 
     // Paginate để lấy TẤT CẢ enabled users
     const allUsers = [];
+    const seenEmails = new Set(); // Track seen emails to detect duplicates
     let start = 0;
     const pageLength = 20; // Frappe default/max limit seems to be 20
     let hasMore = true;
+    const maxPages = 100; // Safety limit: max 100 pages (2000 users)
+    let pageCount = 0;
 
-    while (hasMore) {
+    while (hasMore && pageCount < maxPages) {
+      pageCount++;
       const listResponse = await axios.get(
         `${FRAPPE_API_URL}/api/resource/User`,
         {
@@ -97,11 +101,29 @@ async function getAllFrappeUsers(token) {
       );
 
       const userList = listResponse.data.data || [];
-      console.log(`   📄 Page fetched: ${userList.length} users (start: ${start})`);
+      console.log(`   📄 Page ${pageCount} fetched: ${userList.length} users (start: ${start})`);
 
       if (userList.length === 0) {
         hasMore = false;
       } else {
+        // Detect duplicate data (infinite loop protection)
+        let newUsersCount = 0;
+        for (const user of userList) {
+          const email = user.email || user.name;
+          if (email && !seenEmails.has(email)) {
+            seenEmails.add(email);
+            newUsersCount++;
+          }
+        }
+        
+        if (newUsersCount === 0) {
+          console.log(`   ⚠️  No new users in this page - stopping (likely reached end or duplicate data)`);
+          hasMore = false;
+          break;
+        }
+        
+        console.log(`   🆕 ${newUsersCount} new users in this page`);
+        
         // Filter enabled users (bao gồm cả System Users và Website Users)
         // Priority: user_type > enabled field > disabled field > docstatus
         const enabledUsers = userList.filter(user => {
@@ -150,7 +172,11 @@ async function getAllFrappeUsers(token) {
       }
     }
 
-    console.log(`✅ Found ${allUsers.length} enabled users from Frappe`);
+    if (pageCount >= maxPages) {
+      console.log(`⚠️  Reached max pages limit (${maxPages} pages = ${maxPages * pageLength} users max)`);
+    }
+
+    console.log(`✅ Found ${allUsers.length} enabled users from Frappe (${pageCount} pages fetched)`);
 
     // Không cần fetch detail nữa - list API đã đủ thông tin cần thiết
     // Roles thường empty và Has Role API bị 403, không cần thiết cho sync
