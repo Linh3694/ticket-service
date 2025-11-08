@@ -1,5 +1,6 @@
 const Ticket = require("../../models/Ticket");
 const { SUBTASK_LOGS } = require('../../utils/logFormatter');
+const mongoose = require('mongoose');
 
 /**
  * Get subtasks by ticket ID
@@ -98,7 +99,7 @@ const addSubTask = async (req, res) => {
 
     // Create subtask
     const subTask = {
-      _id: require('mongoose').Types.ObjectId(),
+      _id: new mongoose.Types.ObjectId(),
       title: title.trim(),
       description: description?.trim() || '',
       assignedTo: assignedTo || null,
