@@ -6,11 +6,17 @@ const SupportTeamMember = require('../models/SupportTeamMember');
  */
 const CATEGORY_PREFIXES = {
   'Overall': 'OVR',
+  'Vấn đề chung': 'OVR', // Vietnamese name for Overall
   'Camera': 'CAM',
+  'Hệ thống camera': 'CAM', // Vietnamese name for Camera
   'Network': 'NW',
+  'Hệ thống mạng': 'NW', // Vietnamese name for Network
   'Bell System': 'PA',
+  'Hệ thống chuông báo': 'PA', // Vietnamese name for Bell System
   'Software': 'SW',
-  'Account': 'ACC'
+  'Hệ thống phần mềm': 'SW', // Vietnamese name for Software
+  'Account': 'ACC',
+  'Tài khoản': 'ACC' // Vietnamese name for Account
 };
 
 /**
