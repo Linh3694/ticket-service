@@ -20,8 +20,8 @@ const getSubTasksByTicket = async (req, res) => {
     }
 
     // Check permission
-    const isCreator = ticket.creator.equals(userId);
-    const isAssignedTo = ticket.assignedTo && ticket.assignedTo.equals(userId);
+    const isCreator = ticket.creator.toString() === userId.toString();
+    const isAssignedTo = ticket.assignedTo && ticket.assignedTo.toString() === userId.toString();
     const isSupportTeam = req.user.roles && req.user.roles.some(role =>
       ['SIS IT', 'IT Helpdesk', 'System Manager', 'technical', 'superadmin'].includes(role)
     );
@@ -76,7 +76,7 @@ const addSubTask = async (req, res) => {
     }
 
     // Check permission: only assignedTo or support team can add subtasks
-    const isAssignedTo = ticket.assignedTo && ticket.assignedTo.equals(userId);
+    const isAssignedTo = ticket.assignedTo && ticket.assignedTo.toString() === userId.toString();
     const isSupportTeam = req.user.roles && req.user.roles.some(role =>
       ['SIS IT', 'IT Helpdesk', 'System Manager', 'technical', 'superadmin'].includes(role)
     );
@@ -178,11 +178,11 @@ const updateSubTaskStatus = async (req, res) => {
     }
 
     // Check permission
-    const isAssignedTo = ticket.assignedTo && ticket.assignedTo.equals(userId);
+    const isAssignedTo = ticket.assignedTo && ticket.assignedTo.toString() === userId.toString();
     const isSupportTeam = req.user.roles && req.user.roles.some(role =>
       ['SIS IT', 'IT Helpdesk', 'System Manager', 'technical', 'superadmin'].includes(role)
     );
-    const isSubTaskAssignee = subTask.assignedTo && subTask.assignedTo.equals(userId);
+    const isSubTaskAssignee = subTask.assignedTo && subTask.assignedTo.toString() === userId.toString();
 
     if (!isAssignedTo && !isSupportTeam && !isSubTaskAssignee) {
       return res.status(403).json({
@@ -249,7 +249,7 @@ const deleteSubTask = async (req, res) => {
     const subTask = ticket.subTasks[subTaskIndex];
 
     // Check permission
-    const isAssignedTo = ticket.assignedTo && ticket.assignedTo.equals(userId);
+    const isAssignedTo = ticket.assignedTo && ticket.assignedTo.toString() === userId.toString();
     const isSupportTeam = req.user.roles && req.user.roles.some(role =>
       ['SIS IT', 'IT Helpdesk', 'System Manager', 'technical', 'superadmin'].includes(role)
     );
