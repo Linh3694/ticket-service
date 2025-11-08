@@ -118,10 +118,46 @@ const getTeamMemberFeedbackStats = async (req, res) => {
       });
     }
 
-    // Get ALL tickets assigned to this user
+    // Get SupportTeamMember by email
+    const SupportTeamMember = require("../../models/SupportTeamMember");
+    const member = await SupportTeamMember.findOne({ email: user.email }).lean();
+    
+    if (!member) {
+      return res.json({
+        success: true,
+        data: {
+          user: {
+            _id: user._id,
+            email: user.email,
+            fullname: user.fullname,
+            avatarUrl: user.avatarUrl,
+            jobTitle: user.jobTitle,
+            department: user.department
+          },
+          summary: {
+            totalTickets: 0,
+            completedTickets: 0,
+            closedTickets: 0,
+            feedbackCount: 0,
+            completionRate: 0,
+            responseRate: 0
+          },
+          feedback: {
+            averageRating: 0,
+            ratingDistribution: { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 },
+            badges: [],
+            badgeCounts: {},
+            totalBadges: 0,
+            totalUniqueAwards: 0
+          }
+        }
+      });
+    }
+
+    // Get ALL tickets assigned to this SupportTeamMember
     // Don't use select() to ensure we get all nested feedback fields
     const allTickets = await Ticket.find({
-      assignedTo: user._id
+      assignedTo: member._id
     }).lean();
 
     const totalTickets = allTickets.length;
@@ -254,10 +290,43 @@ const getTechnicalStats = async (req, res) => {
 
     const userStats = await Promise.all(
       technicalUsers.map(async (user) => {
-        // Get all tickets assigned to this user
+        // Get SupportTeamMember by email
+        const SupportTeamMember = require("../../models/SupportTeamMember");
+        const member = await SupportTeamMember.findOne({ email: user.email }).lean();
+        
+        // If user is not a support team member, return empty stats
+        if (!member) {
+          return {
+            user: {
+              _id: user._id,
+              email: user.email,
+              fullname: user.fullname,
+              avatarUrl: user.avatarUrl,
+              jobTitle: user.jobTitle,
+              department: user.department
+            },
+            summary: {
+              totalTickets: 0,
+              completedTickets: 0,
+              closedTickets: 0,
+              feedbackCount: 0,
+              completionRate: 0,
+              responseRate: 0,
+              averageRating: 0
+            },
+            ratingBreakdown: {
+              distribution: { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 },
+              topBadges: [],
+              totalBadges: 0,
+              totalUniqueAwards: 0
+            }
+          };
+        }
+
+        // Get all tickets assigned to this SupportTeamMember
         // Don't use select() to ensure we get all nested feedback fields
         const allTickets = await Ticket.find({
-          assignedTo: user._id
+          assignedTo: member._id
         }).lean();
 
         const totalTickets = allTickets.length;
