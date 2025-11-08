@@ -3,7 +3,6 @@ const router = express.Router();
 const ticketController = require("../controllers/ticketController");
 const { authenticate } = require("../middleware/authMiddleware");
 const { upload, handleUploadError } = require("../middleware/uploadTicket");
-const uploadMessage = require("../middleware/uploadMessage");
 
 // Ticket routes
 // ⚠️ IMPORTANT: Order matters! More specific routes BEFORE dynamic ones (:ticketId)
@@ -30,7 +29,7 @@ router.put("/:ticketId", authenticate, upload.array("attachments", 15), ticketCo
 router.delete("/:ticketId", authenticate, ticketController.deleteTicket);
 router.post("/:ticketId/feedback", authenticate, ticketController.addFeedback);
 router.post("/:ticketId/escalate", authenticate, ticketController.escalateTicket);
-router.post("/:ticketId/messages", authenticate, uploadMessage.array("files", 15), ticketController.sendMessage);
+router.post("/:ticketId/messages", authenticate, upload.array("files", 15), ticketController.sendMessage);
 router.get("/:ticketId/messages", authenticate, ticketController.getTicketMessages);
 router.post("/:ticketId/subtasks", authenticate, ticketController.addSubTask);
 router.get("/:ticketId/subtasks", authenticate, ticketController.getSubTasksByTicket);

@@ -1,6 +1,7 @@
 const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
+const { fileFilter } = require("./fileFilter");
 
 // Định nghĩa đường dẫn thư mục upload
 const uploadDir = "uploads/Tickets";
@@ -19,19 +20,6 @@ const storage = multer.diskStorage({
     cb(null, Date.now() + "-" + file.originalname);
   },
 });
-
-// Cho phép upload nhiều loại file hơn (như workspace-backend)
-const fileFilter = (req, file, cb) => {
-  const allowedTypes = /jpeg|jpg|png|gif|pdf|doc|docx|txt|zip/;
-  const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
-  const mimetype = allowedTypes.test(file.mimetype);
-
-  if (extname && mimetype) {
-    return cb(null, true);
-  } else {
-    cb(new Error("Chỉ chấp nhận file: jpg, jpeg, png, gif, pdf, doc, docx, txt, zip"));
-  }
-};
 
 // Cấu hình upload: tối đa 15 file, mỗi file 10MB (như config.env.example)
 const upload = multer({
