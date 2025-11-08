@@ -598,30 +598,85 @@ exports.getTickets = async (req, res) => {
 
     const tickets = await Ticket.find(query)
       .sort({ createdAt: -1 })
-      .populate("creator assignedTo");
+      .populate({
+        path: 'creator',
+        select: 'fullname email avatarUrl'
+      })
+      .populate({
+        path: 'assignedTo',
+        model: 'SupportTeamMember',
+        select: '_id email'
+      });
 
     console.log("Found tickets:", tickets.length);
 
+    // Enrich tickets with SupportTeamMember user data
+    const enrichedTickets = await enrichTicketsWithSupportTeamMembers(tickets);
+
     // Enrich tickets with avatars from Frappe using JWT token from request
     const frappeToken = req.headers.authorization?.replace('Bearer ', '') || null;
-    for (const ticket of tickets) {
+    for (const ticket of enrichedTickets) {
       await enrichTicketWithAvatars(ticket, frappeToken);
     }
 
-    res.status(200).json({ success: true, tickets });
+    res.status(200).json({ success: true, tickets: enrichedTickets });
   } catch (error) {
     console.error("Error in getTickets:", error);
     res.status(500).json({ success: false, message: error.message });
   }
 };
 
+// Helper function to enrich tickets with SupportTeamMember data
+async function enrichTicketsWithSupportTeamMembers(tickets) {
+  if (!tickets || tickets.length === 0) return tickets;
+
+  const SupportTeamMember = require('../models/SupportTeamMember');
+
+  // Collect all assignedTo IDs that are not null
+  const assignedToIds = tickets
+    .map(ticket => ticket.assignedTo)
+    .filter(id => id && typeof id === 'object' && id._id) // SupportTeamMember ObjectId
+    .map(id => id._id || id);
+
+  if (assignedToIds.length === 0) return tickets;
+
+  // Get support team members data
+  const supportMembers = await SupportTeamMember.find({ _id: { $in: assignedToIds } }).lean();
+
+  // Populate user data for support members
+  const populatedMembers = await SupportTeamMember.populateUserData(supportMembers);
+
+  // Create map for quick lookup
+  const memberMap = new Map(populatedMembers.map(member => [member._id.toString(), member]));
+
+  // Enrich tickets with support team member data
+  return tickets.map(ticket => {
+    if (ticket.assignedTo && typeof ticket.assignedTo === 'object' && ticket.assignedTo._id) {
+      const memberId = ticket.assignedTo._id.toString();
+      const supportMember = memberMap.get(memberId);
+
+      if (supportMember) {
+        ticket.assignedTo = {
+          _id: supportMember._id,
+          email: supportMember.email,
+          fullname: supportMember.fullname,
+          avatarUrl: supportMember.avatarUrl,
+          department: supportMember.department,
+          jobTitle: supportMember.jobTitle
+        };
+      }
+    }
+    return ticket;
+  });
+}
+
 // b) Lấy danh sách ticket của user đang đăng nhập (creator = req.user)
 exports.getMyTickets = async (req, res) => {
   try {
     console.log('🎫 [getMyTickets] Fetching tickets for user:', req.user.email);
-    
+
     const userId = req.user._id;
-    
+
     // Lấy ticket nơi user là creator
     const tickets = await Ticket.find({ creator: userId })
       .sort({ createdAt: -1 })
@@ -632,19 +687,23 @@ exports.getMyTickets = async (req, res) => {
       })
       .populate({
         path: 'assignedTo',
-        select: 'fullname email avatarUrl'
+        model: 'SupportTeamMember', // ✅ Đúng model
+        select: '_id email' // Chỉ cần _id và email để populate user data
       });
-    
+
     console.log(`✅ [getMyTickets] Found ${tickets.length} tickets for user ${req.user.email}`);
-    
+
+    // Enrich tickets with SupportTeamMember user data
+    const enrichedTickets = await enrichTicketsWithSupportTeamMembers(tickets);
+
     // Enrich tickets with avatars from Frappe using JWT token from request
     const frappeToken = req.headers.authorization?.replace('Bearer ', '') || null;
-    for (const ticket of tickets) {
+    for (const ticket of enrichedTickets) {
       await enrichTicketWithAvatars(ticket, frappeToken);
     }
-    
+
     // Format tickets cho frontend
-    const formattedTickets = tickets.map(ticket => ({
+    const formattedTickets = enrichedTickets.map(ticket => ({
       _id: ticket._id,
       title: ticket.title,
       description: ticket.description,
@@ -658,7 +717,7 @@ exports.getMyTickets = async (req, res) => {
       createdAt: ticket.createdAt,
       updatedAt: ticket.updatedAt
     }));
-    
+
     res.status(200).json({
       success: true,
       data: {
