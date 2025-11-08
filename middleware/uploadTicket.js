@@ -28,7 +28,10 @@ const upload = multer({
     fileSize: parseInt(process.env.MAX_FILE_SIZE) || 10 * 1024 * 1024, // 10MB default
     files: 15 // Max 15 files
   },
-  fileFilter,
+  fileFilter: (req, file, cb) => {
+    console.log(`📤 [Upload] File: ${file.originalname}, MIME: ${file.mimetype}`);
+    fileFilter(req, file, cb);
+  },
 });
 
 // Middleware để handle errors

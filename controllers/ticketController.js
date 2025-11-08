@@ -1146,6 +1146,9 @@ exports.sendMessage = async (req, res) => {
   const { ticketId } = req.params;
   const { text } = req.body;
 
+  console.log(`💬 [sendMessage] Files: ${req.files ? req.files.length : 0}, Text: "${text}"`);
+  console.log(`💬 [sendMessage] req.files:`, req.files);
+
   try {
     const ticket = await Ticket.findById(ticketId).populate("creator assignedTo");
     if (!ticket) {
