@@ -125,6 +125,35 @@ const sendMessage = async (req, res) => {
     ticket.updatedAt = new Date();
     await ticket.save();
 
+    // Broadcast new message to WebSocket clients
+    try {
+      const wsHandler = req.app.get('wsHandler');
+      if (wsHandler) {
+        wsHandler.broadcastToTicket(ticketId, {
+          type: 'new_message',
+          message: message,
+          timestamp: new Date().toISOString()
+        });
+        console.log(`📡 [WebSocket] Broadcasted message to ticket: ${ticketId}`);
+      }
+
+      // Also broadcast ticket update if status changed
+      if (statusChanged && wsHandler) {
+        wsHandler.broadcastToTicket(ticketId, {
+          type: 'ticket_updated',
+          ticket: {
+            _id: ticket._id,
+            status: ticket.status,
+            updatedAt: ticket.updatedAt
+          },
+          timestamp: new Date().toISOString()
+        });
+        console.log(`📡 [WebSocket] Broadcasted ticket status update to: ${ticketId}`);
+      }
+    } catch (wsError) {
+      console.warn('⚠️ [WebSocket] Failed to broadcast message:', wsError.message);
+    }
+
     res.json({
       success: true,
       message: 'Tin nhắn đã được gửi thành công',
