@@ -718,9 +718,11 @@ const assignTicketToMe = async (req, res) => {
     const previousAssigneeId = ticket.assignedTo;
 
     // Update ticket
+    console.log(`🔄 [assignTicketToMe] Before update: assignedTo=${ticket.assignedTo}, userId=${userId}`);
     ticket.assignedTo = userId;
     ticket.status = 'Processing';
     ticket.acceptedAt = new Date();
+    console.log(`✅ [assignTicketToMe] After update: assignedTo=${ticket.assignedTo}, status=${ticket.status}`);
 
     // Log assignment - handle both initial assignment and transfer
     const userName = req.user.fullname || req.user.email;
@@ -738,10 +740,14 @@ const assignTicketToMe = async (req, res) => {
       user: userId
     });
 
+    console.log(`💾 [assignTicketToMe] Before save: ticket.assignedTo=${ticket.assignedTo}`);
     await ticket.save();
+    console.log(`💾 [assignTicketToMe] After save: ticket.assignedTo=${ticket.assignedTo}`);
 
     // Populate for response
+    console.log(`🔍 [assignTicketToMe] Before populate: ticket.assignedTo=${ticket.assignedTo}`);
     await ticket.populate('creator assignedTo', 'fullname email avatarUrl');
+    console.log(`🔍 [assignTicketToMe] After populate: ticket.assignedTo=${JSON.stringify(ticket.assignedTo)}`);
 
     res.json({
       success: true,
