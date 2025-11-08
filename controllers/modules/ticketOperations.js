@@ -269,14 +269,14 @@ const createTicket = async (req, res) => {
     console.log(`📝 [createTicket] Creator name: "${creatorName}"`);
 
     // Log ticket creation
-    await logTicketHistory(newTicket._id, TICKET_LOGS.CREATED(creatorName), userId);
+    await logTicketHistory(newTicket._id, TICKET_LOGS.TICKET_CREATED(creatorName), userId);
 
     // Log assignment if assigned
     if (assignedToId) {
       const assignedUser = await User.findById(assignedToId);
       if (assignedUser) {
         const assignedName = assignedUser.fullname || assignedUser.email;
-        await logTicketHistory(newTicket._id, TICKET_LOGS.ASSIGNED(assignedName, creatorName), userId);
+        await logTicketHistory(newTicket._id, TICKET_LOGS.AUTO_ASSIGNED(assignedName), userId);
       }
     }
 
@@ -722,7 +722,7 @@ const assignTicketToMe = async (req, res) => {
     const userName = req.user.fullname || req.user.email;
     ticket.history.push({
       timestamp: new Date(),
-      action: TICKET_LOGS.ASSIGNED(userName, userName),
+      action: TICKET_LOGS.TICKET_ACCEPTED(userName),
       user: userId
     });
 
@@ -786,7 +786,7 @@ const cancelTicketWithReason = async (req, res) => {
     const userName = req.user.fullname || req.user.email;
     ticket.history.push({
       timestamp: new Date(),
-      action: TICKET_LOGS.CANCELLED(userName, cancelReason.trim()),
+      action: TICKET_LOGS.TICKET_CANCELLED(userName, cancelReason.trim()),
       user: userId
     });
 
@@ -847,7 +847,7 @@ const reopenTicket = async (req, res) => {
     const userName = req.user.fullname || req.user.email;
     ticket.history.push({
       timestamp: new Date(),
-      action: TICKET_LOGS.REOPENED(userName),
+      action: TICKET_LOGS.TICKET_REOPENED(userName, previousStatus),
       user: userId
     });
 
