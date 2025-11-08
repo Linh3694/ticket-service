@@ -29,6 +29,10 @@ class WebSocketHandler extends EventEmitter {
 
       console.log(`🔌 [WebSocket] Client connected - Ticket: ${ticketId}, User: ${userId}`);
 
+      // Store userId on the socket for later identification
+      ws._userId = userId;
+      ws._ticketId = ticketId;
+
       // Store client connection
       this.addClient(ticketId, ws);
       if (userId) {
@@ -180,6 +184,29 @@ class WebSocketHandler extends EventEmitter {
         }
       });
     }
+  }
+
+  // Broadcast to all clients EXCEPT one (e.g., sender)
+  broadcastToTicketExcept(ticketId, excludeUserId, data) {
+    const clients = this.clients.get(ticketId);
+    if (clients) {
+      const message = JSON.stringify(data);
+      clients.forEach((client) => {
+        if (client.readyState === WebSocket.OPEN) {
+          // Check if this client belongs to the excluded user
+          const clientUserId = this.getClientUserId(client);
+          if (clientUserId !== excludeUserId) {
+            client.send(message);
+          }
+        }
+      });
+    }
+  }
+
+  // Get user ID associated with a WebSocket client
+  getClientUserId(ws) {
+    // Return stored user ID from connection setup
+    return ws._userId || null;
   }
 
   // Broadcast to all clients of a user

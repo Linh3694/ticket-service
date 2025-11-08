@@ -125,19 +125,22 @@ const sendMessage = async (req, res) => {
     ticket.updatedAt = new Date();
     await ticket.save();
 
-    // Broadcast new message to WebSocket clients
+    // Broadcast new message to WebSocket clients (EXCEPT sender)
+    // Sender already has optimistic message and receives via onSuccess
     try {
       const wsHandler = req.app.get('wsHandler');
       if (wsHandler) {
-        wsHandler.broadcastToTicket(ticketId, {
+        // Broadcast to all clients EXCEPT the sender
+        // This prevents duplicate messages at sender's UI
+        wsHandler.broadcastToTicketExcept(ticketId, userId, {
           type: 'new_message',
           message: message,
           timestamp: new Date().toISOString()
         });
-        console.log(`📡 [WebSocket] Broadcasted message to ticket: ${ticketId}`);
+        console.log(`📡 [WebSocket] Broadcasted message to ticket: ${ticketId} (except sender: ${userId})`);
       }
 
-      // Also broadcast ticket update if status changed
+      // Also broadcast ticket update if status changed (to all including sender)
       if (statusChanged && wsHandler) {
         wsHandler.broadcastToTicket(ticketId, {
           type: 'ticket_updated',
