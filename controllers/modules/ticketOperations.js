@@ -418,8 +418,8 @@ const getTickets = async (req, res) => {
       .skip(skip)
       .limit(limitNum)
       .populate([
-        { path: 'creator', select: 'fullname email avatarUrl' },
-        { path: 'assignedTo', select: 'email _id' }
+        { path: 'creator', select: 'fullname email avatarUrl jobTitle department' },
+        { path: 'assignedTo', select: '_id fullname email avatarUrl jobTitle department' }
       ])
       .lean();
 
@@ -477,8 +477,8 @@ const getAllTickets = async (req, res) => {
     let tickets = await Ticket.find(filter)
       .sort({ createdAt: -1 })
       .populate([
-        { path: 'creator', select: 'fullname email avatarUrl' },
-        { path: 'assignedTo', select: 'email _id' }
+        { path: 'creator', select: 'fullname email avatarUrl jobTitle department' },
+        { path: 'assignedTo', select: '_id fullname email avatarUrl jobTitle department' }
       ])
       .lean();
 
@@ -527,8 +527,8 @@ const getMyTickets = async (req, res) => {
       .skip(skip)
       .limit(limitNum)
       .populate([
-        { path: 'creator', select: 'fullname email avatarUrl' },
-        { path: 'assignedTo', select: 'email _id' }
+        { path: 'creator', select: 'fullname email avatarUrl jobTitle department' },
+        { path: 'assignedTo', select: '_id fullname email avatarUrl jobTitle department' }
       ])
       .lean();
 
