@@ -10,6 +10,7 @@ require("dotenv").config({ path: './config.env' });
 // Import configurations
 const database = require('./config/database');
 const redisClient = require('./config/redis');
+const WebSocketHandler = require('./services/websocketHandler');
 
 const app = express();
 const server = http.createServer(app);
@@ -43,6 +44,13 @@ app.set('io', io);
     console.warn('⚠️ [Ticket Service] Redis adapter setup failed:', error.message);
   }
 })();
+
+// Initialize WebSocket Handler
+const wsHandler = new WebSocketHandler(server);
+console.log('✅ [Ticket Service] WebSocket handler initialized');
+
+// Make wsHandler accessible in controllers
+app.set('wsHandler', wsHandler);
 
 // Connect to MariaDB
 const connectDB = async () => {

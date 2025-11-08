@@ -19,6 +19,7 @@
     "redis": "^4.6.8",
     "socket.io": "^4.7.2",
     "@socket.io/redis-adapter": "^8.3.0",
+    "ws": "^8.14.2",
     "@azure/identity": "^4.8.0",
     "@microsoft/microsoft-graph-client": "^3.0.7",
     "cors": "^2.8.5",
