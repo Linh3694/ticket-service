@@ -1,7 +1,5 @@
 const WebSocket = require('ws');
 const { EventEmitter } = require('events');
-const Ticket = require('../models/Ticket');
-const Message = require('../models/Message');
 
 class WebSocketHandler extends EventEmitter {
   constructor(server) {
