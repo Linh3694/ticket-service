@@ -12,6 +12,69 @@ const path = require('path');
 // Import User model for getTechnicalUsers
 const User = require("../../models/Users");
 
+// Helper function để populate assignedTo field với full user data
+async function populateAssignedToData(tickets) {
+  if (!tickets) return tickets;
+  
+  const isArray = Array.isArray(tickets);
+  const ticketsArray = isArray ? tickets : [tickets];
+  
+  // Lấy tất cả unique email từ assignedTo
+  const memberIds = new Set();
+  ticketsArray.forEach(t => {
+    if (t.assignedTo && t.assignedTo._id) {
+      memberIds.add(t.assignedTo._id.toString());
+    }
+  });
+  
+  if (memberIds.size === 0) return tickets;
+  
+  // Populate SupportTeamMember -> User data
+  const SupportTeamMember = require("../../models/SupportTeamMember");
+  const memberEmails = [];
+  
+  for (const memberId of memberIds) {
+    const member = await SupportTeamMember.findById(memberId).lean();
+    if (member && member.email) {
+      memberEmails.push(member.email);
+    }
+  }
+  
+  if (memberEmails.length > 0) {
+    const users = await User.find({ email: { $in: memberEmails } })
+      .select('email fullname avatarUrl jobTitle department')
+      .lean();
+    
+    const userMap = new Map(users.map(u => [u.email, u]));
+    
+    // Update tickets with user data
+    ticketsArray.forEach(t => {
+      if (t.assignedTo) {
+        const member = t.assignedTo;
+        // member sẽ có email field nếu populate từ SupportTeamMember
+        const memberDoc = member.toObject ? member.toObject() : member;
+        
+        // Nếu assignedTo là object nhưng chưa có fullname, kết hợp user data
+        if (member.email) {
+          const user = userMap.get(member.email);
+          if (user) {
+            t.assignedTo = {
+              _id: member._id,
+              email: member.email,
+              fullname: user.fullname || member.email,
+              avatarUrl: user.avatarUrl || '',
+              jobTitle: user.jobTitle || '',
+              department: user.department || ''
+            };
+          }
+        }
+      }
+    });
+  }
+  
+  return isArray ? ticketsArray : ticketsArray[0];
+}
+
 // Frappe API configuration
 const FRAPPE_API_URL = process.env.FRAPPE_API_URL || 'https://admin.sis.wellspring.edu.vn';
 
@@ -288,15 +351,18 @@ const getTickets = async (req, res) => {
     const total = await Ticket.countDocuments(filter);
 
     // Get paginated results
-    const tickets = await Ticket.find(filter)
+    let tickets = await Ticket.find(filter)
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limitNum)
       .populate([
         { path: 'creator', select: 'fullname email avatarUrl' },
-        { path: 'assignedTo', select: 'fullname email avatarUrl jobTitle' }
+        { path: 'assignedTo', select: 'email _id' }
       ])
       .lean();
+
+    // Populate assignedTo với full user data (fullname, avatarUrl, jobTitle)
+    tickets = await populateAssignedToData(tickets);
 
     const pages = Math.ceil(total / limitNum);
 
@@ -346,13 +412,16 @@ const getAllTickets = async (req, res) => {
       ];
     }
 
-    const tickets = await Ticket.find(filter)
+    let tickets = await Ticket.find(filter)
       .sort({ createdAt: -1 })
       .populate([
         { path: 'creator', select: 'fullname email avatarUrl' },
-        { path: 'assignedTo', select: 'fullname email avatarUrl jobTitle' }
+        { path: 'assignedTo', select: 'email _id' }
       ])
       .lean();
+
+    // Populate assignedTo với full user data (fullname, avatarUrl, jobTitle)
+    tickets = await populateAssignedToData(tickets);
 
     res.json({
       success: true,
@@ -391,15 +460,18 @@ const getMyTickets = async (req, res) => {
     const total = await Ticket.countDocuments(filter);
 
     // Get paginated results
-    const tickets = await Ticket.find(filter)
+    let tickets = await Ticket.find(filter)
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limitNum)
       .populate([
         { path: 'creator', select: 'fullname email avatarUrl' },
-        { path: 'assignedTo', select: 'fullname email avatarUrl jobTitle' }
+        { path: 'assignedTo', select: 'email _id' }
       ])
       .lean();
+
+    // Populate assignedTo với full user data (fullname, avatarUrl, jobTitle)
+    tickets = await populateAssignedToData(tickets);
 
     const pages = Math.ceil(total / limitNum);
 
@@ -432,10 +504,11 @@ const getTicketById = async (req, res) => {
   try {
     const { ticketId } = req.params;
 
-    const ticket = await Ticket.findById(ticketId)
+    let ticket = await Ticket.findById(ticketId)
       .populate('creator', 'fullname email avatarUrl jobTitle department')
-      .populate('assignedTo', 'fullname email avatarUrl jobTitle department')
-      .populate('history.user', 'fullname email avatarUrl');
+      .populate('assignedTo', 'email _id')
+      .populate('history.user', 'fullname email avatarUrl')
+      .lean();
 
     if (!ticket) {
       return res.status(404).json({
@@ -443,6 +516,9 @@ const getTicketById = async (req, res) => {
         message: 'Ticket không tồn tại'
       });
     }
+
+    // Populate assignedTo với full user data (fullname, avatarUrl, jobTitle)
+    ticket = await populateAssignedToData(ticket);
 
     res.json({
       success: true,
