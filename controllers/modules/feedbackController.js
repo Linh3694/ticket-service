@@ -39,8 +39,8 @@ const acceptFeedback = async (req, res) => {
       });
     }
 
-    // Check if ticket can be closed
-    if (!['Processing', 'Waiting for Customer'].includes(ticket.status)) {
+    // Check if ticket can be closed (allow Done status for user feedback)
+    if (!['Processing', 'Waiting for Customer', 'Done'].includes(ticket.status)) {
       return res.status(400).json({
         success: false,
         message: 'Ticket không thể được đóng ở trạng thái hiện tại'
