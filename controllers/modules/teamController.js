@@ -156,59 +156,46 @@ const removeUserFromSupportTeam = async (req, res) => {
  */
 const getTicketCategories = async (req, res) => {
   try {
+    // Mapping roles to category values and Vietnamese labels
+    const roleToCategory = {
+      'Overall': { value: 'Overall', label: 'Vấn đề chung' },
+      'Software': { value: 'Software', label: 'Hệ thống phần mềm' },
+      'Network System': { value: 'Network', label: 'Hệ thống mạng' },
+      'Camera System': { value: 'Camera', label: 'Hệ thống camera' },
+      'Bell System': { value: 'Bell System', label: 'Hệ thống chuông báo' }
+    };
+
     // Get all unique categories from support team members
     const members = await SupportTeamMember.find({ active: true })
       .select('roles')
       .lean();
 
-    const categories = new Set();
+    const categoryMap = new Map();
 
     // Map roles to categories
     members.forEach(member => {
       if (member.roles) {
         member.roles.forEach(role => {
-          switch (role) {
-            case 'Overall':
-              categories.add('Tổng quát');
-              break;
-            case 'Software':
-              categories.add('Phần mềm');
-              break;
-            case 'Network System':
-              categories.add('Hệ thống mạng');
-              break;
-            case 'Camera System':
-              categories.add('Hệ thống camera');
-              break;
-            case 'Bell System':
-              categories.add('Hệ thống chuông');
-              break;
-            case 'Email Ticket':
-              categories.add('Email Support');
-              break;
+          const category = roleToCategory[role];
+          if (category) {
+            categoryMap.set(category.value, category);
           }
         });
       }
     });
 
-    // Convert to array and sort
-    const categoryList = Array.from(categories).sort();
-
-    // Return as objects with value/label
-    const result = categoryList.map(category => ({
-      value: category,
-      label: category
-    }));
+    // Convert to array and sort by value
+    const result = Array.from(categoryMap.values()).sort((a, b) => a.value.localeCompare(b.value));
 
     // Fallback categories if no team members found
     if (result.length === 0) {
       result.push(
-        { value: 'Tổng quát', label: 'Tổng quát' },
-        { value: 'Phần mềm', label: 'Phần mềm' },
-        { value: 'Hệ thống mạng', label: 'Hệ thống mạng' },
-        { value: 'Hệ thống camera', label: 'Hệ thống camera' },
-        { value: 'Hệ thống chuông', label: 'Hệ thống chuông' },
-        { value: 'Email Support', label: 'Email Support' }
+        { value: 'Overall', label: 'Vấn đề chung' },
+        { value: 'Camera', label: 'Hệ thống camera' },
+        { value: 'Network', label: 'Hệ thống mạng' },
+        { value: 'Bell System', label: 'Hệ thống chuông báo' },
+        { value: 'Software', label: 'Hệ thống phần mềm' },
+        { value: 'Account', label: 'Tài khoản' }
       );
     }
 
