@@ -1,5 +1,6 @@
 const Ticket = require("../../models/Ticket");
 const { TICKET_LOGS } = require('../../utils/logFormatter');
+const { Types } = require('mongoose');
 
 /**
  * Send message to ticket
@@ -68,7 +69,7 @@ const sendMessage = async (req, res) => {
 
     // Create message object
     const message = {
-      _id: new require('mongoose').Types.ObjectId(),
+      _id: new Types.ObjectId(),
       sender: {
         _id: userId,
         fullname: userName,
