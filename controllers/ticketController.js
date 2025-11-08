@@ -739,7 +739,7 @@ exports.getTicketById = async (req, res) => {
     const ticket = await Ticket.findById(req.params.ticketId)
       .populate({
         path: 'creator',
-        select: 'fullname email avatarUrl'
+        select: 'fullname email avatarUrl jobTitle department'
       })
       .populate({
         path: 'assignedTo',
