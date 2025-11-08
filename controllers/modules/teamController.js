@@ -156,52 +156,19 @@ const removeUserFromSupportTeam = async (req, res) => {
  */
 const getTicketCategories = async (req, res) => {
   try {
-    // Mapping roles to category values and Vietnamese labels
-    const roleToCategory = {
-      'Overall': { value: 'Overall', label: 'Vấn đề chung' },
-      'Software': { value: 'Software', label: 'Hệ thống phần mềm' },
-      'Network System': { value: 'Network', label: 'Hệ thống mạng' },
-      'Camera System': { value: 'Camera', label: 'Hệ thống camera' },
-      'Bell System': { value: 'Bell System', label: 'Hệ thống chuông báo' }
-    };
-
-    // Get all unique categories from support team members
-    const members = await SupportTeamMember.find({ active: true })
-      .select('roles')
-      .lean();
-
-    const categoryMap = new Map();
-
-    // Map roles to categories
-    members.forEach(member => {
-      if (member.roles) {
-        member.roles.forEach(role => {
-          const category = roleToCategory[role];
-          if (category) {
-            categoryMap.set(category.value, category);
-          }
-        });
-      }
-    });
-
-    // Convert to array and sort by value
-    const result = Array.from(categoryMap.values()).sort((a, b) => a.value.localeCompare(b.value));
-
-    // Fallback categories if no team members found
-    if (result.length === 0) {
-      result.push(
-        { value: 'Overall', label: 'Vấn đề chung' },
-        { value: 'Camera', label: 'Hệ thống camera' },
-        { value: 'Network', label: 'Hệ thống mạng' },
-        { value: 'Bell System', label: 'Hệ thống chuông báo' },
-        { value: 'Software', label: 'Hệ thống phần mềm' },
-        { value: 'Account', label: 'Tài khoản' }
-      );
-    }
+    // Always return categories based on SUPPORT_ROLES (excluding 'Email Ticket' as it's not a ticket category)
+    const categories = [
+      { value: 'Overall', label: 'Vấn đề chung' },
+      { value: 'Software', label: 'Hệ thống phần mềm' },
+      { value: 'Network', label: 'Hệ thống mạng' },
+      { value: 'Camera', label: 'Hệ thống camera' },
+      { value: 'Bell System', label: 'Hệ thống chuông báo' },
+      { value: 'Account', label: 'Tài khoản' }
+    ];
 
     res.json({
       success: true,
-      data: result
+      data: categories
     });
 
   } catch (error) {
@@ -211,12 +178,12 @@ const getTicketCategories = async (req, res) => {
     res.json({
       success: true,
       data: [
-        { value: 'Tổng quát', label: 'Tổng quát' },
-        { value: 'Phần mềm', label: 'Phần mềm' },
-        { value: 'Hệ thống mạng', label: 'Hệ thống mạng' },
-        { value: 'Hệ thống camera', label: 'Hệ thống camera' },
-        { value: 'Hệ thống chuông', label: 'Hệ thống chuông' },
-        { value: 'Email Support', label: 'Email Support' }
+        { value: 'Overall', label: 'Vấn đề chung' },
+        { value: 'Software', label: 'Hệ thống phần mềm' },
+        { value: 'Network', label: 'Hệ thống mạng' },
+        { value: 'Camera', label: 'Hệ thống camera' },
+        { value: 'Bell System', label: 'Hệ thống chuông báo' },
+        { value: 'Account', label: 'Tài khoản' }
       ]
     });
   }

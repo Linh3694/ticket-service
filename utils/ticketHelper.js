@@ -8,8 +8,10 @@ const CATEGORY_PREFIXES = {
   'Overall': 'OVR',
   'Vấn đề chung': 'OVR', // Vietnamese name for Overall
   'Camera': 'CAM',
+  'Camera System': 'CAM', // Alternative name for Camera
   'Hệ thống camera': 'CAM', // Vietnamese name for Camera
   'Network': 'NW',
+  'Network System': 'NW', // Alternative name for Network
   'Hệ thống mạng': 'NW', // Vietnamese name for Network
   'Bell System': 'PA',
   'Hệ thống chuông báo': 'PA', // Vietnamese name for Bell System
@@ -17,6 +19,26 @@ const CATEGORY_PREFIXES = {
   'Hệ thống phần mềm': 'SW', // Vietnamese name for Software
   'Account': 'ACC',
   'Tài khoản': 'ACC' // Vietnamese name for Account
+};
+
+/**
+ * Mapping giữa category và role để tìm team member
+ */
+const CATEGORY_TO_ROLE = {
+  'Overall': 'Overall',
+  'Vấn đề chung': 'Overall',
+  'Camera': 'Camera System',
+  'Camera System': 'Camera System',
+  'Hệ thống camera': 'Camera System',
+  'Network': 'Network System',
+  'Network System': 'Network System',
+  'Hệ thống mạng': 'Network System',
+  'Bell System': 'Bell System',
+  'Hệ thống chuông báo': 'Bell System',
+  'Software': 'Software',
+  'Hệ thống phần mềm': 'Software',
+  'Account': 'Account',
+  'Tài khoản': 'Account'
 };
 
 /**
@@ -58,16 +80,18 @@ async function generateTicketCode(category) {
  */
 async function assignTicketToUser(category) {
   try {
-    console.log(`🔍 [assignTicket] Finding team member with role: ${category}`);
+    // Map category to role for team member lookup
+    const role = CATEGORY_TO_ROLE[category] || category;
+    console.log(`🔍 [assignTicket] Finding team member with role: ${role} (from category: ${category})`);
 
     // Sử dụng static method getMembersByRole (auto-populates user data)
-    const teamMembers = await SupportTeamMember.getMembersByRole(category);
+    const teamMembers = await SupportTeamMember.getMembersByRole(role);
 
-    console.log(`   📋 Query: roles=${category}, isActive=true`);
+    console.log(`   📋 Query: roles=${role}, isActive=true`);
     console.log(`   ✅ Found ${teamMembers.length} team member(s)`);
 
     if (teamMembers.length === 0) {
-      console.warn(`⚠️  [assignTicket] No team member found for role: ${category}`);
+      console.warn(`⚠️  [assignTicket] No team member found for role: ${role}`);
       return null;
     }
 
@@ -139,5 +163,6 @@ module.exports = {
   generateTicketCode,
   assignTicketToUser,
   logTicketHistory,
-  CATEGORY_PREFIXES
+  CATEGORY_PREFIXES,
+  CATEGORY_TO_ROLE
 };
