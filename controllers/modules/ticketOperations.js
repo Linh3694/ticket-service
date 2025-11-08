@@ -89,7 +89,11 @@ async function populateAssignedToData(tickets) {
   
   // Update tickets with user data
   ticketsArray.forEach(t => {
-    if (t.assignedTo) {
+    // Handle cases where assignedTo is null after populate
+    if (t.assignedTo === null) {
+      console.log(`⚠️  [populateAssignedToData] assignedTo is null for ticket: ${t.ticketCode}`);
+      t.assignedTo = null; // Keep it as null, frontend should handle this
+    } else if (t.assignedTo) {
       const member = t.assignedTo;
       
       if (member._id) {

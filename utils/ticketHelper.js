@@ -103,8 +103,10 @@ async function assignTicketToUser(category) {
     if (teamMembers.length === 1) {
       const assignedMember = teamMembers[0];
       console.log(`✅ [assignTicket] Assigned to: ${assignedMember.fullname} (only 1 member)`);
-      console.log(`   Member ID: ${assignedMember._id}`);
-      return assignedMember._id;
+      console.log(`   SupportTeamMember ID: ${assignedMember._id}`);
+      console.log(`   User ID: ${assignedMember.userId}`);
+      // Return User ID (assignedMember.userId) not SupportTeamMember._id
+      return assignedMember.userId || assignedMember._id;
     }
 
     // Nếu có nhiều người, tìm người có ít ticket nhất (load balancing)
@@ -113,11 +115,11 @@ async function assignTicketToUser(category) {
       teamMembers.map(async (member) => {
         const Ticket = require('../models/Ticket');
         const ticketCount = await Ticket.countDocuments({
-          assignedTo: member._id,
+          assignedTo: member.userId || member._id,
           status: { $in: ['Assigned', 'Processing'] }
         });
         console.log(`   - ${member.fullname}: ${ticketCount} active tickets`);
-        return { memberId: member._id, name: member.fullname, ticketCount };
+        return { userId: member.userId || member._id, name: member.fullname, ticketCount };
       })
     );
 
@@ -126,8 +128,8 @@ async function assignTicketToUser(category) {
 
     const selected = memberStats[0];
     console.log(`✅ [assignTicket] Assigned to: ${selected.name} (${selected.ticketCount} active tickets)`);
-    console.log(`   Member ID: ${selected.memberId}`);
-    return selected.memberId;
+    console.log(`   User ID: ${selected.userId}`);
+    return selected.userId;
   } catch (error) {
     console.error('❌ Error assigning ticket:', error.message);
     console.error('   Stack:', error.stack);

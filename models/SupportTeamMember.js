@@ -20,9 +20,10 @@ const supportTeamMemberSchema = new mongoose.Schema({
     index: true
   },
   
-  // DEPRECATED: Giữ lại để tương thích, nhưng không dùng nữa
+  // Reference ObjectId đến User collection (từ Frappe)
   userId: {
-    type: String,
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
     index: true
   },
   
@@ -80,7 +81,7 @@ supportTeamMemberSchema.statics.populateUserData = async function(members) {
   
   const emails = members.map(m => m.email).filter(Boolean);
   const users = await User.find({ email: { $in: emails } })
-    .select('email fullname avatarUrl department jobTitle')
+    .select('_id email fullname avatarUrl department jobTitle')
     .lean();
   
   const userMap = new Map(users.map(u => [u.email, u]));
@@ -91,11 +92,14 @@ supportTeamMemberSchema.statics.populateUserData = async function(members) {
     
     return {
       ...memberObj,
+      // Update userId with actual ObjectId if found in Users collection
+      userId: user?._id || memberObj.userId,
       // Populate từ Users collection
       fullname: user?.fullname || memberObj.email,
       avatarUrl: user?.avatarUrl || '',
       department: user?.department || '',
-      jobTitle: user?.jobTitle || 'User'
+      jobTitle: user?.jobTitle || 'User',
+      _id: user?._id  // Also add User._id for direct reference
     };
   });
 };
@@ -147,7 +151,7 @@ supportTeamMemberSchema.statics.createOrUpdate = async function(memberData) {
   
   // Validate user exists trong Users collection
   const User = mongoose.model('User');
-  const user = await User.findOne({ email }).select('email fullname');
+  const user = await User.findOne({ email }).select('_id email fullname');
   if (!user) {
     throw new Error(`User not found in Users collection: ${email}`);
   }
@@ -166,6 +170,7 @@ supportTeamMemberSchema.statics.createOrUpdate = async function(memberData) {
     // Update existing member
     existingMember.roles = roles || existingMember.roles;
     existingMember.notes = notes !== undefined ? notes : existingMember.notes;
+    existingMember.userId = user._id; // Update with actual User ObjectId
     existingMember.isActive = true;
     
     await existingMember.save();
@@ -177,7 +182,7 @@ supportTeamMemberSchema.statics.createOrUpdate = async function(memberData) {
     // Create new member
     const newMember = new this({
       email,
-      userId: userId || email, // Backward compatibility
+      userId: user._id, // Store actual User ObjectId
       roles: roles || [],
       notes: notes || '',
       isActive: true
