@@ -75,6 +75,10 @@ const TICKET_LOGS = {
   TICKET_REOPENED: (userName, previousStatus) =>
     `<strong>${normalizeVietnameseName(userName)}</strong> đã mở lại ticket. Trạng thái chuyển từ <strong>"${translateStatus(previousStatus)}"</strong> sang <strong>"Đang xử lý"</strong>`,
 
+  // Send message
+  MESSAGE_SENT: (userName, messagePreview) =>
+    `<strong>${normalizeVietnameseName(userName)}</strong> đã gửi tin nhắn: <em>"${messagePreview}"</em>`,
+
   // Accept feedback
   FEEDBACK_ACCEPTED: (userName, rating) =>
     `<strong>${normalizeVietnameseName(userName)}</strong> đã chấp nhận kết quả với đánh giá <strong>${rating} sao</strong>. Ticket chuyển sang <strong>"Đóng"</strong>`,
