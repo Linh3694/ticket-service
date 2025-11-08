@@ -600,7 +600,7 @@ exports.getTickets = async (req, res) => {
       .sort({ createdAt: -1 })
       .populate({
         path: 'creator',
-        select: 'fullname email avatarUrl'
+        select: 'fullname email avatarUrl jobTitle department'
       })
       .populate({
         path: 'assignedTo',
@@ -683,7 +683,7 @@ exports.getMyTickets = async (req, res) => {
       .select('_id title description ticketCode status creator assignedTo priority category createdAt updatedAt')
       .populate({
         path: 'creator',
-        select: 'fullname email avatarUrl'
+        select: 'fullname email avatarUrl jobTitle department'
       })
       .populate({
         path: 'assignedTo',
@@ -791,7 +791,7 @@ exports.getTicketHistory = async (req, res) => {
       .populate({
         path: 'history.user',
         model: 'User',
-        select: 'fullname email avatarUrl'
+        select: 'fullname email avatarUrl jobTitle department'
       })
       .select('history');
 
@@ -1247,7 +1247,7 @@ exports.sendMessage = async (req, res) => {
     const updatedTicket = await Ticket.findById(ticketId)
       .populate({
         path: 'creator',
-        select: 'fullname email avatarUrl'
+        select: 'fullname email avatarUrl jobTitle department'
       })
       .populate({
         path: 'assignedTo',
@@ -1379,7 +1379,7 @@ exports.addSubTask = async (req, res) => {
     const updatedTicket = await Ticket.findById(ticketId)
       .populate({
         path: 'creator',
-        select: 'fullname email avatarUrl'
+        select: 'fullname email avatarUrl jobTitle department'
       })
       .populate({
         path: 'assignedTo',
