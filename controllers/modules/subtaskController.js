@@ -116,7 +116,7 @@ const addSubTask = async (req, res) => {
     // Log subtask creation
     ticket.history.push({
       timestamp: new Date(),
-      action: SUBTASK_LOGS.CREATED(subTask.title, userName),
+      action: SUBTASK_LOGS.SUBTASK_CREATED(userName, subTask.title, subTask.status),
       user: userId
     });
 
@@ -198,7 +198,7 @@ const updateSubTaskStatus = async (req, res) => {
     // Log status change
     ticket.history.push({
       timestamp: new Date(),
-      action: SUBTASK_LOGS.STATUS_CHANGED(subTask.title, oldStatus, status, userName),
+      action: SUBTASK_LOGS.SUBTASK_STATUS_CHANGED(userName, subTask.title, oldStatus, status),
       user: userId
     });
 
@@ -264,7 +264,7 @@ const deleteSubTask = async (req, res) => {
     // Log deletion
     ticket.history.push({
       timestamp: new Date(),
-      action: SUBTASK_LOGS.DELETED(subTask.title, userName),
+      action: SUBTASK_LOGS.SUBTASK_DELETED(userName, subTask.title),
       user: userId
     });
 
