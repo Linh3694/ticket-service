@@ -12,10 +12,14 @@ const sendMessage = async (req, res) => {
     const userId = req.user._id;
     const userName = req.user.fullname || req.user.email;
 
-    if (!text?.trim()) {
+    // Check if there's text or files
+    const hasText = text?.trim();
+    const hasFiles = req.files && (Array.isArray(req.files) ? req.files.length > 0 : Object.keys(req.files).length > 0);
+
+    if (!hasText && !hasFiles) {
       return res.status(400).json({
         success: false,
-        message: 'Nội dung tin nhắn không được để trống'
+        message: 'Nội dung tin nhắn hoặc ảnh không được để trống'
       });
     }
 
@@ -67,6 +71,19 @@ const sendMessage = async (req, res) => {
       newStatus = 'Waiting for Customer';
     }
 
+    // Process file uploads (multer stores files in uploads/Tickets)
+    const images = [];
+    if (req.files && Array.isArray(req.files)) {
+      for (const file of req.files) {
+        // Multer already saved the file, just reference it
+        // file.path is relative to project root after multer saves it
+        const relativePath = file.path.replace(/\\/g, '/'); // normalize path separators
+        console.log(`✅ File uploaded: ${file.originalname} -> ${relativePath}`);
+        // Store path for frontend to access via /uploads/Tickets/...
+        images.push(relativePath);
+      }
+    }
+
     // Create message object
     const message = {
       _id: new Types.ObjectId(),
@@ -76,9 +93,10 @@ const sendMessage = async (req, res) => {
         email: req.user.email,
         avatarUrl: req.user.avatarUrl
       },
-      text: text.trim(),
+      text: hasText ? text.trim() : '',
       timestamp: new Date(),
-      type: 'text'
+      type: images.length > 0 ? (hasText ? 'text_with_images' : 'image') : 'text',
+      images: images.length > 0 ? images : undefined
     };
 
     // Add message to ticket
