@@ -737,7 +737,15 @@ exports.getMyTickets = async (req, res) => {
 exports.getTicketById = async (req, res) => {
   try {
     const ticket = await Ticket.findById(req.params.ticketId)
-      .populate("creator assignedTo")
+      .populate({
+        path: 'creator',
+        select: 'fullname email avatarUrl'
+      })
+      .populate({
+        path: 'assignedTo',
+        model: 'SupportTeamMember',
+        select: '_id email'
+      })
       .populate({
         path: "messages.sender",
         model: "User",
@@ -753,14 +761,17 @@ exports.getTicketById = async (req, res) => {
       return res.status(404).json({ success: false, message: "Ticket không tồn tại" });
     }
 
-    // Enrich ticket with avatars from Frappe if missing
-    // Use JWT token from request headers or localStorage (already in req.headers.authorization)
-    const frappeToken = req.headers.authorization?.replace('Bearer ', '') || null;
-    await enrichTicketWithAvatars(ticket, frappeToken);
+    // Enrich ticket with SupportTeamMember user data
+    const enrichedTickets = await enrichTicketsWithSupportTeamMembers([ticket]);
+    const enrichedTicket = enrichedTickets[0];
 
-    return res.status(200).json({ 
-      success: true, 
-      data: ticket 
+    // Enrich ticket with avatars from Frappe if missing
+    const frappeToken = req.headers.authorization?.replace('Bearer ', '') || null;
+    await enrichTicketWithAvatars(enrichedTicket, frappeToken);
+
+    return res.status(200).json({
+      success: true,
+      data: enrichedTicket
     });
   } catch (error) {
     console.error("❌ Error in getTicketById:", error);
@@ -1234,15 +1245,27 @@ exports.sendMessage = async (req, res) => {
 
     await ticket.save();
     const updatedTicket = await Ticket.findById(ticketId)
-      .populate("creator assignedTo")
+      .populate({
+        path: 'creator',
+        select: 'fullname email avatarUrl'
+      })
+      .populate({
+        path: 'assignedTo',
+        model: 'SupportTeamMember',
+        select: '_id email'
+      })
       .populate({
         path: "messages.sender",
         model: "User",
         select: "fullname avatarUrl email",
       });
 
+    // Enrich ticket with SupportTeamMember user data
+    const enrichedTickets = await enrichTicketsWithSupportTeamMembers([updatedTicket]);
+    const enrichedUpdatedTicket = enrichedTickets[0];
+
     // Process the last message to ensure avatar URL
-    const lastMessage = updatedTicket.messages[updatedTicket.messages.length - 1];
+    const lastMessage = enrichedUpdatedTicket.messages[enrichedUpdatedTicket.messages.length - 1];
     let processedLastMessage = lastMessage.toObject ? lastMessage.toObject() : lastMessage;
 
     // Ensure avatar URL is processed
@@ -1275,7 +1298,7 @@ exports.sendMessage = async (req, res) => {
         ? "Tin nhắn đã được gửi và trạng thái ticket đã được cập nhật"
         : "Tin nhắn đã được gửi thành công",
       messageData: processedLastMessage,
-      ticket: updatedTicket,
+      ticket: enrichedUpdatedTicket,
       statusChanged: statusChanged,
       oldStatus: oldStatus,
       newStatus: newStatus,
@@ -1354,10 +1377,22 @@ exports.addSubTask = async (req, res) => {
     await ticket.save();
 
     const updatedTicket = await Ticket.findById(ticketId)
-      .populate("creator assignedTo")
+      .populate({
+        path: 'creator',
+        select: 'fullname email avatarUrl'
+      })
+      .populate({
+        path: 'assignedTo',
+        model: 'SupportTeamMember',
+        select: '_id email'
+      })
       .populate("subTasks.assignedTo");
 
-    res.status(201).json({ success: true, ticket: updatedTicket });
+    // Enrich ticket with SupportTeamMember user data
+    const enrichedTickets = await enrichTicketsWithSupportTeamMembers([updatedTicket]);
+    const enrichedUpdatedTicket = enrichedTickets[0];
+
+    res.status(201).json({ success: true, ticket: enrichedUpdatedTicket });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
