@@ -11,7 +11,9 @@ const getSubTasksByTicket = async (req, res) => {
     const userId = req.user._id;
 
     const ticket = await Ticket.findById(ticketId)
-      .populate('subTasks.assignedTo', 'fullname email avatarUrl');
+      .populate('creator', 'fullname email avatarUrl jobTitle department')
+      .populate('assignedTo', '_id fullname email avatarUrl jobTitle department')
+      .populate('subTasks.assignedTo', 'fullname email avatarUrl jobTitle department');
 
     if (!ticket) {
       return res.status(404).json({
@@ -124,8 +126,10 @@ const addSubTask = async (req, res) => {
     ticket.updatedAt = new Date();
     await ticket.save();
 
-    // Populate for response
-    await ticket.populate('subTasks.assignedTo', 'fullname email avatarUrl');
+    // Populate for response - populate ticket fields + subtask assignedTo
+    await ticket.populate('creator', 'fullname email avatarUrl jobTitle department');
+    await ticket.populate('assignedTo', '_id fullname email avatarUrl jobTitle department');
+    await ticket.populate('subTasks.assignedTo', 'fullname email avatarUrl jobTitle department');
 
     res.status(201).json({
       success: true,
