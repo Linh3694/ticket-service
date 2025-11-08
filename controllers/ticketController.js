@@ -1193,7 +1193,7 @@ exports.sendMessage = async (req, res) => {
     if (req.files && req.files.length > 0) {
       // Multiple images
       req.files.forEach(file => {
-        const filePath = `/uploads/Messages/${file.filename}`;
+        const filePath = `/uploads/Tickets/${file.filename}`;
         ticket.messages.push({
           sender: req.user._id,
           text: filePath,
@@ -1203,7 +1203,7 @@ exports.sendMessage = async (req, res) => {
       });
     } else if (req.file) {
       // Single file (backward compatibility)
-      const filePath = `/uploads/Messages/${req.file.filename}`;
+      const filePath = `/uploads/Tickets/${req.file.filename}`;
       ticket.messages.push({
         sender: req.user._id,
         text: filePath,
