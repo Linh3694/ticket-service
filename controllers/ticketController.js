@@ -1189,29 +1189,30 @@ exports.sendMessage = async (req, res) => {
       }
     }
 
-    // Handle multiple files
+    // Handle multiple files + text in ONE message
     if (req.files && req.files.length > 0) {
-      // Multiple images
-      req.files.forEach(file => {
-        const filePath = `/uploads/Tickets/${file.filename}`;
-        ticket.messages.push({
-          sender: req.user._id,
-          text: filePath,
-          timestamp: new Date(),
-          type: "image",
-        });
+      // Multiple images + optional text
+      const imagePaths = req.files.map(file => `/uploads/Tickets/${file.filename}`);
+      
+      ticket.messages.push({
+        sender: req.user._id,
+        text: text?.trim() || "", // Text content (empty if no text)
+        images: imagePaths, // Array of image URLs
+        timestamp: new Date(),
+        type: text?.trim() ? "text" : "image", // Type based on content
       });
     } else if (req.file) {
       // Single file (backward compatibility)
       const filePath = `/uploads/Tickets/${req.file.filename}`;
       ticket.messages.push({
         sender: req.user._id,
-        text: filePath,
+        text: text?.trim() || "",
+        images: [filePath], // Single image in array
         timestamp: new Date(),
-        type: "image",
+        type: text?.trim() ? "text" : "image",
       });
     } else {
-      // Text message
+      // Text message only
       if (!text?.trim()) {
         return res.status(400).json({
           success: false,
