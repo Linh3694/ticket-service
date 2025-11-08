@@ -76,6 +76,7 @@ const ticketSchema = new mongoose.Schema(
         {
           sender: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
           text: String,
+          images: [String], // Array of image URLs
           timestamp: { type: Date, default: Date.now },
           type: { type: String, default: "text" },
 

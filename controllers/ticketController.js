@@ -1197,22 +1197,34 @@ exports.sendMessage = async (req, res) => {
       // Multiple images + optional text
       const imagePaths = req.files.map(file => `/uploads/Tickets/${file.filename}`);
       
+      // Xác định type dựa trên nội dung
+      let messageType = "image";
+      if (text?.trim()) {
+        messageType = "text-with-images"; // Có cả text và ảnh
+      }
+      
       ticket.messages.push({
         sender: req.user._id,
         text: text?.trim() || "", // Text content (empty if no text)
         images: imagePaths, // Array of image URLs
         timestamp: new Date(),
-        type: text?.trim() ? "text" : "image", // Type based on content
+        type: messageType,
       });
     } else if (req.file) {
       // Single file (backward compatibility)
       const filePath = `/uploads/Tickets/${req.file.filename}`;
+      
+      let messageType = "image";
+      if (text?.trim()) {
+        messageType = "text-with-images";
+      }
+      
       ticket.messages.push({
         sender: req.user._id,
         text: text?.trim() || "",
         images: [filePath], // Single image in array
         timestamp: new Date(),
-        type: text?.trim() ? "text" : "image",
+        type: messageType,
       });
     } else {
       // Text message only
