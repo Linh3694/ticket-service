@@ -68,7 +68,7 @@ const sendMessage = async (req, res) => {
 
     // Create message object
     const message = {
-      _id: require('mongoose').Types.ObjectId(),
+      _id: new require('mongoose').Types.ObjectId(),
       sender: {
         _id: userId,
         fullname: userName,
