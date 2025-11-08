@@ -20,9 +20,11 @@ const storage = multer.diskStorage({
 
 // Cho phép upload nhiều loại file hơn
 const fileFilter = (req, file, cb) => {
-  const allowedTypes = /jpeg|jpg|png|gif|pdf|doc|docx|txt|zip|mp4|avi|mov/;
-  const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
-  const mimetype = allowedTypes.test(file.mimetype);
+  const allowedMimetypes = /image\/(jpeg|jpg|png|gif)|application\/(pdf|msword|vnd\.openxmlformats-officedocument\.wordprocessingml\.document|x-zip-compressed)|text\/plain|video\/(mp4|x-msvideo|quicktime)/;
+  const allowedExtensions = /\.jpeg|\.jpg|\.png|\.gif|\.pdf|\.doc|\.docx|\.txt|\.zip|\.mp4|\.avi|\.mov$/i;
+  
+  const extname = allowedExtensions.test(path.extname(file.originalname));
+  const mimetype = allowedMimetypes.test(file.mimetype);
 
   if (extname && mimetype) {
     return cb(null, true);
