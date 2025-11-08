@@ -12,6 +12,26 @@ const path = require('path');
 // Import User model for getTechnicalUsers
 const User = require("../../models/Users");
 
+// Helper function để fix assignedTo null issue sau khi populate
+async function fixAssignedToIfNull(ticket) {
+  if (!ticket) return ticket;
+  
+  // Nếu assignedTo null sau populate, tức là user không tồn tại trong DB
+  if (ticket.assignedTo === null || !ticket.assignedTo || !ticket.assignedTo._id) {
+    // Lấy assignedTo ID từ raw data nếu có
+    const ticket_raw = await Ticket.findById(ticket._id).select('assignedTo').lean();
+    if (ticket_raw && ticket_raw.assignedTo) {
+      const user = await User.findById(ticket_raw.assignedTo)
+        .select('_id fullname email avatarUrl jobTitle department')
+        .lean();
+      if (user) {
+        ticket.assignedTo = user;
+      }
+    }
+  }
+  return ticket;
+}
+
 // Helper function để populate assignedTo field với full user data
 async function populateAssignedToData(tickets) {
   if (!tickets) return tickets;
@@ -21,13 +41,20 @@ async function populateAssignedToData(tickets) {
   
   // Lấy tất cả unique email từ assignedTo
   const memberIds = new Set();
+  const userIds = new Set();
+  
   ticketsArray.forEach(t => {
-    if (t.assignedTo && t.assignedTo._id) {
-      memberIds.add(t.assignedTo._id.toString());
+    if (t.assignedTo) {
+      if (t.assignedTo._id) {
+        memberIds.add(t.assignedTo._id.toString());
+      } else if (typeof t.assignedTo === 'string') {
+        // Nếu assignedTo là string ID
+        userIds.add(t.assignedTo);
+      }
     }
   });
   
-  if (memberIds.size === 0) return tickets;
+  if (memberIds.size === 0 && userIds.size === 0) return tickets;
   
   // Populate SupportTeamMember -> User data
   const SupportTeamMember = require("../../models/SupportTeamMember");
@@ -40,27 +67,39 @@ async function populateAssignedToData(tickets) {
     }
   }
   
+  // Lấy users trực tiếp từ User collection
+  const users = [];
   if (memberEmails.length > 0) {
-    const users = await User.find({ email: { $in: memberEmails } })
+    const foundUsers = await User.find({ email: { $in: memberEmails } })
       .select('email fullname avatarUrl jobTitle department')
       .lean();
-    
-    const userMap = new Map(users.map(u => [u.email, u]));
-    
-    // Update tickets with user data
-    ticketsArray.forEach(t => {
-      if (t.assignedTo) {
-        const member = t.assignedTo;
-        // member sẽ có email field nếu populate từ SupportTeamMember
-        const memberDoc = member.toObject ? member.toObject() : member;
-        
-        // Nếu assignedTo là object nhưng chưa có fullname, kết hợp user data
+    users.push(...foundUsers);
+  }
+  
+  // Thêm users từ userIds set
+  if (userIds.size > 0) {
+    const userIdArray = Array.from(userIds);
+    const foundUsers = await User.find({ _id: { $in: userIdArray } })
+      .select('_id email fullname avatarUrl jobTitle department')
+      .lean();
+    users.push(...foundUsers);
+  }
+  
+  const userMap = new Map(users.map(u => [u.email || u._id.toString(), u]));
+  
+  // Update tickets with user data
+  ticketsArray.forEach(t => {
+    if (t.assignedTo) {
+      const member = t.assignedTo;
+      
+      if (member._id) {
+        // Nếu assignedTo là object nhưng chưa có fullname
         if (member.email) {
           const user = userMap.get(member.email);
           if (user) {
             t.assignedTo = {
               _id: member._id,
-              email: member.email,
+              email: member.email || user.email,
               fullname: user.fullname || member.email,
               avatarUrl: user.avatarUrl || '',
               jobTitle: user.jobTitle || '',
@@ -68,9 +107,22 @@ async function populateAssignedToData(tickets) {
             };
           }
         }
+      } else if (typeof member === 'string') {
+        // Nếu assignedTo là string ID
+        const user = userMap.get(member);
+        if (user) {
+          t.assignedTo = {
+            _id: user._id,
+            email: user.email,
+            fullname: user.fullname,
+            avatarUrl: user.avatarUrl || '',
+            jobTitle: user.jobTitle || '',
+            department: user.department || ''
+          };
+        }
       }
-    });
-  }
+    }
+  });
   
   return isArray ? ticketsArray : ticketsArray[0];
 }
@@ -291,7 +343,17 @@ const createTicket = async (req, res) => {
     }
 
     // Populate for response
-    await newTicket.populate('creator assignedTo', 'fullname email avatarUrl jobTitle');
+    await newTicket.populate('creator', 'fullname email avatarUrl jobTitle department');
+    await newTicket.populate('assignedTo', 'fullname email avatarUrl jobTitle department _id');
+    
+    // Fix: If assignedTo populate returns null but was assigned, use the ID
+    if (assignedToId && (!newTicket.assignedTo || !newTicket.assignedTo._id)) {
+      console.log(`⚠️  [createTicket] assignedTo is null after populate, fetching user data`);
+      const assignedUser = await User.findById(assignedToId).select('_id fullname email avatarUrl jobTitle department').lean();
+      if (assignedUser) {
+        newTicket.assignedTo = assignedUser;
+      }
+    }
 
     res.status(201).json({
       success: true,
@@ -506,7 +568,7 @@ const getTicketById = async (req, res) => {
 
     let ticket = await Ticket.findById(ticketId)
       .populate('creator', 'fullname email avatarUrl jobTitle department')
-      .populate('assignedTo', 'email _id')
+      .populate('assignedTo', '_id fullname email avatarUrl jobTitle department')
       .populate('history.user', 'fullname email avatarUrl')
       .lean();
 
@@ -556,7 +618,8 @@ const updateTicket = async (req, res) => {
     }
 
     const ticket = await Ticket.findById(ticketId)
-      .populate('creator assignedTo');
+      .populate('creator', 'fullname email avatarUrl jobTitle department')
+      .populate('assignedTo', '_id fullname email avatarUrl jobTitle department');
 
     if (!ticket) {
       return res.status(404).json({ success: false, message: "Ticket không tồn tại" });
@@ -616,7 +679,14 @@ const updateTicket = async (req, res) => {
     console.log(`✅ [updateTicket] Ticket updated: ${ticketId}`);
 
     // Populate for response
-    await ticket.populate('creator assignedTo', 'fullname email avatarUrl');
+    await ticket.populate('creator', 'fullname email avatarUrl jobTitle department');
+    await ticket.populate('assignedTo', '_id fullname email avatarUrl jobTitle department');
+    
+    // Fix: If assignedTo is null after populate, fetch directly from User collection
+    if (ticket.assignedTo === null && ticket._id) {
+      console.log(`⚠️  [updateTicket] assignedTo is null after populate, fetching...`);
+      await fixAssignedToIfNull(ticket);
+    }
 
     res.status(200).json({
       success: true,
@@ -756,8 +826,28 @@ const assignTicketToMe = async (req, res) => {
 
     // Populate for response
     console.log(`🔍 [assignTicketToMe] Before populate: ticket.assignedTo=${ticket.assignedTo}`);
-    await ticket.populate('creator assignedTo', 'fullname email avatarUrl');
+    await ticket.populate('creator', 'fullname email avatarUrl jobTitle department');
+    await ticket.populate('assignedTo', '_id fullname email avatarUrl jobTitle department');
     console.log(`🔍 [assignTicketToMe] After populate: ticket.assignedTo=${JSON.stringify(ticket.assignedTo)}`);
+    
+    // Fix: If populate returns null, use helper to fetch from User collection
+    if (!ticket.assignedTo || !ticket.assignedTo._id) {
+      console.log(`⚠️  [assignTicketToMe] assignedTo is null after populate, fixing...`);
+      await fixAssignedToIfNull(ticket);
+      
+      // If still null, fallback to req.user data
+      if (!ticket.assignedTo || !ticket.assignedTo._id) {
+        console.log(`⚠️  [assignTicketToMe] Still null, using req.user data as fallback`);
+        ticket.assignedTo = {
+          _id: req.user._id,
+          fullname: req.user.fullname,
+          email: req.user.email,
+          avatarUrl: req.user.avatarUrl || '',
+          jobTitle: req.user.jobTitle || '',
+          department: req.user.department || ''
+        };
+      }
+    }
 
     res.json({
       success: true,
@@ -819,6 +909,16 @@ const cancelTicketWithReason = async (req, res) => {
     });
 
     await ticket.save();
+    
+    // Populate for response
+    await ticket.populate('creator', 'fullname email avatarUrl jobTitle department');
+    await ticket.populate('assignedTo', '_id fullname email avatarUrl jobTitle department');
+    
+    // Fix: If assignedTo is null after populate
+    if (ticket.assignedTo === null && ticket._id) {
+      console.log(`⚠️  [cancelTicketWithReason] assignedTo is null after populate, fetching...`);
+      await fixAssignedToIfNull(ticket);
+    }
 
     res.json({
       success: true,
@@ -868,6 +968,7 @@ const reopenTicket = async (req, res) => {
       });
     }
 
+    const previousStatus = ticket.status;
     ticket.status = 'Processing';
     ticket.closedAt = null;
 
@@ -880,6 +981,16 @@ const reopenTicket = async (req, res) => {
     });
 
     await ticket.save();
+    
+    // Populate for response
+    await ticket.populate('creator', 'fullname email avatarUrl jobTitle department');
+    await ticket.populate('assignedTo', '_id fullname email avatarUrl jobTitle department');
+    
+    // Fix: If assignedTo is null after populate
+    if (ticket.assignedTo === null && ticket._id) {
+      console.log(`⚠️  [reopenTicket] assignedTo is null after populate, fetching...`);
+      await fixAssignedToIfNull(ticket);
+    }
 
     res.json({
       success: true,
