@@ -18,6 +18,7 @@ router.post("/support-team/remove-user", ticketController.removeUserFromSupportT
 
 // Named routes
 router.get("/my-tickets", authenticate, ticketController.getMyTickets);
+router.get("/all-tickets", authenticate, ticketController.getAllTickets);
 router.get("/", authenticate, ticketController.getTickets);
 router.get("/me", authenticate, ticketController.getMe);
 router.get("/feedback-stats/:email", ticketController.getTeamMemberFeedbackStats);

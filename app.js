@@ -149,14 +149,14 @@ app.get('/health', async (req, res) => {
   }
 });
 
+// Import services first
+const notificationService = require('./services/notificationService');
+
 // Import routes
 const ticketRoutes = require('./routes/tickets');
 const emailRoutes = require('./routes/emailRoutes');
 const supportTeamRoutes = require('./routes/supportTeam');
 const userRoutes = require('./routes/user');
-
-// Import services
-const notificationService = require('./services/notificationService');
 
 // Use routes
 // ⚠️ IMPORTANT: Order matters! More specific routes BEFORE generic ones
