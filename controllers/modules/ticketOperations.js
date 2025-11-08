@@ -696,6 +696,16 @@ const assignTicketToMe = async (req, res) => {
     const { ticketId } = req.params;
     const userId = req.user._id;
 
+    console.log(`👤 [assignTicketToMe] req.user:`, JSON.stringify(req.user, null, 2));
+    console.log(`🆔 [assignTicketToMe] userId: ${userId}`);
+
+    // Check if user exists
+    const userExists = await User.findById(userId);
+    console.log(`🔍 [assignTicketToMe] User exists: ${!!userExists}`);
+    if (userExists) {
+      console.log(`👤 [assignTicketToMe] User data:`, JSON.stringify(userExists, null, 2));
+    }
+
     const ticket = await Ticket.findById(ticketId);
 
     if (!ticket) {
