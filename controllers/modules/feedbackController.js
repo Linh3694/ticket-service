@@ -14,7 +14,8 @@ const acceptFeedback = async (req, res) => {
     const userName = req.user.fullname || req.user.email;
 
     // Validation
-    if (!rating || rating < 1 || rating > 5) {
+    const ratingNum = parseInt(rating, 10);
+    if (isNaN(ratingNum) || ratingNum < 1 || ratingNum > 5) {
       return res.status(400).json({
         success: false,
         message: 'Đánh giá phải từ 1 đến 5 sao'
@@ -49,7 +50,7 @@ const acceptFeedback = async (req, res) => {
     // Create feedback object
     const feedback = {
       assignedTo: ticket.assignedTo,
-      rating: rating,
+      rating: ratingNum,
       comment: comment?.trim() || '',
       badges: badges || [],
       createdAt: new Date()
@@ -63,7 +64,7 @@ const acceptFeedback = async (req, res) => {
     // Log feedback acceptance
     ticket.history.push({
       timestamp: new Date(),
-      action: TICKET_LOGS.FEEDBACK_ACCEPTED(userName, rating),
+      action: TICKET_LOGS.FEEDBACK_ACCEPTED(userName, ratingNum),
       user: userId
     });
 
