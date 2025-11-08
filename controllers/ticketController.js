@@ -1282,6 +1282,7 @@ exports.sendMessage = async (req, res) => {
     const messageData = {
       _id: processedLastMessage._id,
       text: processedLastMessage.text,
+      images: processedLastMessage.images || [], // Thêm images
       sender: processedLastMessage.sender,
       timestamp: processedLastMessage.timestamp,
       type: processedLastMessage.type,
