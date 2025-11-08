@@ -101,14 +101,16 @@ const acceptFeedback = async (req, res) => {
 };
 
 /**
- * Get feedback stats for team member
+ * Get feedback stats for team member - COMPREHENSIVE
  */
 const getTeamMemberFeedbackStats = async (req, res) => {
   try {
     const { email } = req.params;
 
-    // Find user by email
-    const user = await User.findOne({ email: email });
+    // Find user by email with full data
+    const user = await User.findOne({ email: email })
+      .select('_id email fullname avatarUrl jobTitle department');
+    
     if (!user) {
       return res.status(404).json({
         success: false,
@@ -116,20 +118,45 @@ const getTeamMemberFeedbackStats = async (req, res) => {
       });
     }
 
-    // Get all tickets assigned to this user with feedback
-    const ticketsWithFeedback = await Ticket.find({
-      assignedTo: user._id,
-      feedback: { $exists: true, $ne: null }
-    }).select('feedback');
+    // Get ALL tickets assigned to this user
+    const allTickets = await Ticket.find({
+      assignedTo: user._id
+    }).select('status feedback createdAt closedAt');
+
+    const totalTickets = allTickets.length;
+    const closedTickets = allTickets.filter(t => t.status === 'Closed').length;
+    const completedTickets = allTickets.filter(t => ['Done', 'Closed'].includes(t.status)).length;
+
+    // Get tickets with feedback
+    const ticketsWithFeedback = allTickets.filter(t => t.feedback && t.feedback.rating);
 
     if (ticketsWithFeedback.length === 0) {
       return res.json({
         success: true,
         data: {
-          averageRating: 0,
-          totalFeedbacks: 0,
-          badges: [],
-          badgeCounts: {}
+          user: {
+            _id: user._id,
+            email: user.email,
+            fullname: user.fullname,
+            avatarUrl: user.avatarUrl,
+            jobTitle: user.jobTitle,
+            department: user.department
+          },
+          summary: {
+            totalTickets,
+            completedTickets,
+            closedTickets,
+            feedbackCount: 0,
+            completionRate: totalTickets > 0 ? Math.round((completedTickets / totalTickets) * 100) : 0,
+            responseRate: 0
+          },
+          feedback: {
+            averageRating: 0,
+            ratingDistribution: { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 },
+            badges: [],
+            badgeCounts: {},
+            totalBadges: 0
+          }
         }
       });
     }
@@ -137,6 +164,12 @@ const getTeamMemberFeedbackStats = async (req, res) => {
     // Calculate stats
     const ratings = ticketsWithFeedback.map(t => t.feedback.rating);
     const averageRating = ratings.reduce((sum, rating) => sum + rating, 0) / ratings.length;
+
+    // Rating distribution
+    const ratingDistribution = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
+    ratings.forEach(rating => {
+      ratingDistribution[rating] = (ratingDistribution[rating] || 0) + 1;
+    });
 
     // Collect all badges
     const allBadges = ticketsWithFeedback.flatMap(t => t.feedback.badges || []);
@@ -150,13 +183,34 @@ const getTeamMemberFeedbackStats = async (req, res) => {
     // Get unique badges sorted by count
     const uniqueBadges = Object.keys(badgeCounts).sort((a, b) => badgeCounts[b] - badgeCounts[a]);
 
+    const responseRate = totalTickets > 0 ? Math.round((ticketsWithFeedback.length / totalTickets) * 100) : 0;
+
     res.json({
       success: true,
       data: {
-        averageRating: Math.round(averageRating * 10) / 10, // Round to 1 decimal
-        totalFeedbacks: ticketsWithFeedback.length,
-        badges: uniqueBadges,
-        badgeCounts: badgeCounts
+        user: {
+          _id: user._id,
+          email: user.email,
+          fullname: user.fullname,
+          avatarUrl: user.avatarUrl,
+          jobTitle: user.jobTitle,
+          department: user.department
+        },
+        summary: {
+          totalTickets,
+          completedTickets,
+          closedTickets,
+          feedbackCount: ticketsWithFeedback.length,
+          completionRate: totalTickets > 0 ? Math.round((completedTickets / totalTickets) * 100) : 0,
+          responseRate: responseRate
+        },
+        feedback: {
+          averageRating: Math.round(averageRating * 10) / 10, // Round to 1 decimal
+          ratingDistribution,
+          badges: uniqueBadges,
+          badgeCounts,
+          totalBadges: allBadges.length
+        }
       }
     });
 
@@ -170,7 +224,7 @@ const getTeamMemberFeedbackStats = async (req, res) => {
 };
 
 /**
- * Get technical stats (for admin)
+ * Get technical stats (for admin) - COMPREHENSIVE
  */
 const getTechnicalStats = async (req, res) => {
   try {
@@ -182,60 +236,97 @@ const getTechnicalStats = async (req, res) => {
         { role: { $in: ['technical', 'superadmin'] } },
         { roles: { $in: ['SIS IT', 'IT Helpdesk', 'System Manager'] } }
       ]
-    }).select('_id email fullname');
+    }).select('_id email fullname avatarUrl jobTitle department');
 
     const userStats = await Promise.all(
       technicalUsers.map(async (user) => {
-        // Count tickets assigned to this user
-        const totalTickets = await Ticket.countDocuments({ assignedTo: user._id });
+        // Get all tickets assigned to this user
+        const allTickets = await Ticket.find({
+          assignedTo: user._id
+        }).select('status feedback');
 
-        // Count completed tickets with feedback
-        const completedTickets = await Ticket.countDocuments({
-          assignedTo: user._id,
-          status: { $in: ['Done', 'Closed'] },
-          feedback: { $exists: true, $ne: null }
-        });
+        const totalTickets = allTickets.length;
+        const closedTickets = allTickets.filter(t => t.status === 'Closed').length;
+        const completedTickets = allTickets.filter(t => ['Done', 'Closed'].includes(t.status)).length;
 
-        // Calculate average rating
-        const ticketsWithFeedback = await Ticket.find({
-          assignedTo: user._id,
-          feedback: { $exists: true, $ne: null }
-        }).select('feedback.rating');
+        // Get tickets with feedback
+        const ticketsWithFeedback = allTickets.filter(t => t.feedback && t.feedback.rating);
 
         let averageRating = 0;
+        let ratingDistribution = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
+        let badgeCounts = {};
+        let topBadges = [];
+
         if (ticketsWithFeedback.length > 0) {
           const ratings = ticketsWithFeedback.map(t => t.feedback.rating);
           averageRating = ratings.reduce((sum, rating) => sum + rating, 0) / ratings.length;
           averageRating = Math.round(averageRating * 10) / 10;
+
+          // Rating distribution
+          ratings.forEach(rating => {
+            ratingDistribution[rating] = (ratingDistribution[rating] || 0) + 1;
+          });
+
+          // Collect badges
+          const allBadges = ticketsWithFeedback.flatMap(t => t.feedback.badges || []);
+          allBadges.forEach(badge => {
+            badgeCounts[badge] = (badgeCounts[badge] || 0) + 1;
+          });
+
+          // Get top 3 badges
+          topBadges = Object.entries(badgeCounts)
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, 3)
+            .map(([badge, count]) => ({ badge, count }));
         }
+
+        const responseRate = totalTickets > 0 ? Math.round((ticketsWithFeedback.length / totalTickets) * 100) : 0;
+        const completionRate = totalTickets > 0 ? Math.round((completedTickets / totalTickets) * 100) : 0;
 
         return {
           user: {
             _id: user._id,
             email: user.email,
-            fullname: user.fullname
+            fullname: user.fullname,
+            avatarUrl: user.avatarUrl,
+            jobTitle: user.jobTitle,
+            department: user.department
           },
-          stats: {
+          summary: {
             totalTickets,
             completedTickets,
-            averageRating,
-            completionRate: totalTickets > 0 ? Math.round((completedTickets / totalTickets) * 100) : 0
+            closedTickets,
+            feedbackCount: ticketsWithFeedback.length,
+            completionRate,
+            responseRate,
+            averageRating
+          },
+          ratingBreakdown: {
+            distribution: ratingDistribution,
+            topBadges
           }
         };
       })
     );
 
-    // Sort by completion rate and average rating
+    // Sort by completion rate, then response rate, then average rating
     userStats.sort((a, b) => {
-      if (b.stats.completionRate !== a.stats.completionRate) {
-        return b.stats.completionRate - a.stats.completionRate;
+      if (b.summary.completionRate !== a.summary.completionRate) {
+        return b.summary.completionRate - a.summary.completionRate;
       }
-      return b.stats.averageRating - a.stats.averageRating;
+      if (b.summary.responseRate !== a.summary.responseRate) {
+        return b.summary.responseRate - a.summary.responseRate;
+      }
+      return b.summary.averageRating - a.summary.averageRating;
     });
 
     res.json({
       success: true,
-      data: userStats
+      data: {
+        timestamp: new Date(),
+        totalMembers: userStats.length,
+        members: userStats
+      }
     });
 
   } catch (error) {
