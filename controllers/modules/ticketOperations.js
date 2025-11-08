@@ -705,24 +705,36 @@ const assignTicketToMe = async (req, res) => {
       });
     }
 
-    // Check if ticket is already assigned
-    if (ticket.assignedTo) {
+    // Check if ticket is already assigned and accepted (status = Processing)
+    // Allow re-assignment only if status is still "Assigned" (auto-assigned but not accepted yet)
+    if (ticket.assignedTo && ticket.status !== 'Assigned') {
       return res.status(400).json({
         success: false,
         message: 'Ticket đã được gán cho người khác'
       });
     }
 
+    // Store previous assignee for logging
+    const previousAssigneeId = ticket.assignedTo;
+
     // Update ticket
     ticket.assignedTo = userId;
     ticket.status = 'Processing';
     ticket.acceptedAt = new Date();
 
-    // Log assignment
+    // Log assignment - handle both initial assignment and transfer
     const userName = req.user.fullname || req.user.email;
+    let previousAssigneeName = null;
+
+    if (previousAssigneeId) {
+      // Get previous assignee name for logging
+      const previousUser = await User.findById(previousAssigneeId).select('fullname email');
+      previousAssigneeName = previousUser ? (previousUser.fullname || previousUser.email) : null;
+    }
+
     ticket.history.push({
       timestamp: new Date(),
-      action: TICKET_LOGS.TICKET_ACCEPTED(userName),
+      action: TICKET_LOGS.TICKET_ACCEPTED(userName, previousAssigneeName),
       user: userId
     });
 
