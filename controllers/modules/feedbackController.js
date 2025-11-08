@@ -119,16 +119,23 @@ const getTeamMemberFeedbackStats = async (req, res) => {
     }
 
     // Get ALL tickets assigned to this user
+    // Don't use select() to ensure we get all nested feedback fields
     const allTickets = await Ticket.find({
       assignedTo: user._id
-    }).select('status feedback createdAt closedAt');
+    }).lean();
 
     const totalTickets = allTickets.length;
     const closedTickets = allTickets.filter(t => t.status === 'Closed').length;
     const completedTickets = allTickets.filter(t => ['Done', 'Closed'].includes(t.status)).length;
 
-    // Get tickets with feedback
-    const ticketsWithFeedback = allTickets.filter(t => t.feedback && t.feedback.rating);
+    // Get tickets with feedback - check that feedback exists and has rating
+    const ticketsWithFeedback = allTickets.filter(t => {
+      return t.feedback && 
+             typeof t.feedback === 'object' && 
+             t.feedback.rating && 
+             t.feedback.rating >= 1 && 
+             t.feedback.rating <= 5;
+    });
 
     if (ticketsWithFeedback.length === 0) {
       return res.json({
@@ -171,13 +178,19 @@ const getTeamMemberFeedbackStats = async (req, res) => {
       ratingDistribution[rating] = (ratingDistribution[rating] || 0) + 1;
     });
 
-    // Collect all badges
-    const allBadges = ticketsWithFeedback.flatMap(t => t.feedback.badges || []);
+    // Collect all badges - ensure badges is array
+    const allBadges = ticketsWithFeedback
+      .filter(t => Array.isArray(t.feedback.badges) && t.feedback.badges.length > 0)
+      .flatMap(t => t.feedback.badges);
+    
     const badgeCounts = {};
+    const totalBadgesCount = allBadges.length;
 
     // Count badge occurrences
     allBadges.forEach(badge => {
-      badgeCounts[badge] = (badgeCounts[badge] || 0) + 1;
+      if (badge) { // Skip empty/null badges
+        badgeCounts[badge] = (badgeCounts[badge] || 0) + 1;
+      }
     });
 
     // Get unique badges sorted by count
@@ -209,7 +222,8 @@ const getTeamMemberFeedbackStats = async (req, res) => {
           ratingDistribution,
           badges: uniqueBadges,
           badgeCounts,
-          totalBadges: allBadges.length
+          totalBadges: totalBadgesCount,
+          totalUniqueAwards: uniqueBadges.length
         }
       }
     });
@@ -241,21 +255,29 @@ const getTechnicalStats = async (req, res) => {
     const userStats = await Promise.all(
       technicalUsers.map(async (user) => {
         // Get all tickets assigned to this user
+        // Don't use select() to ensure we get all nested feedback fields
         const allTickets = await Ticket.find({
           assignedTo: user._id
-        }).select('status feedback');
+        }).lean();
 
         const totalTickets = allTickets.length;
         const closedTickets = allTickets.filter(t => t.status === 'Closed').length;
         const completedTickets = allTickets.filter(t => ['Done', 'Closed'].includes(t.status)).length;
 
-        // Get tickets with feedback
-        const ticketsWithFeedback = allTickets.filter(t => t.feedback && t.feedback.rating);
+        // Get tickets with feedback - check that feedback exists and has rating
+        const ticketsWithFeedback = allTickets.filter(t => {
+          return t.feedback && 
+                 typeof t.feedback === 'object' && 
+                 t.feedback.rating && 
+                 t.feedback.rating >= 1 && 
+                 t.feedback.rating <= 5;
+        });
 
         let averageRating = 0;
         let ratingDistribution = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
         let badgeCounts = {};
         let topBadges = [];
+        let totalBadgesCount = 0;
 
         if (ticketsWithFeedback.length > 0) {
           const ratings = ticketsWithFeedback.map(t => t.feedback.rating);
@@ -267,10 +289,17 @@ const getTechnicalStats = async (req, res) => {
             ratingDistribution[rating] = (ratingDistribution[rating] || 0) + 1;
           });
 
-          // Collect badges
-          const allBadges = ticketsWithFeedback.flatMap(t => t.feedback.badges || []);
+          // Collect badges - ensure badges is array
+          const allBadges = ticketsWithFeedback
+            .filter(t => Array.isArray(t.feedback.badges) && t.feedback.badges.length > 0)
+            .flatMap(t => t.feedback.badges);
+          
+          totalBadgesCount = allBadges.length;
+
           allBadges.forEach(badge => {
-            badgeCounts[badge] = (badgeCounts[badge] || 0) + 1;
+            if (badge) { // Skip empty/null badges
+              badgeCounts[badge] = (badgeCounts[badge] || 0) + 1;
+            }
           });
 
           // Get top 3 badges
@@ -303,7 +332,9 @@ const getTechnicalStats = async (req, res) => {
           },
           ratingBreakdown: {
             distribution: ratingDistribution,
-            topBadges
+            topBadges,
+            totalBadges: totalBadgesCount,
+            totalUniqueAwards: Object.keys(badgeCounts).length
           }
         };
       })
