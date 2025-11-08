@@ -280,27 +280,35 @@ const getTickets = async (req, res) => {
       ];
     }
 
-    const options = {
-      page: parseInt(page),
-      limit: parseInt(limit),
-      sort: { createdAt: -1 },
-      populate: [
+    const pageNum = parseInt(page);
+    const limitNum = parseInt(limit);
+    const skip = (pageNum - 1) * limitNum;
+
+    // Get total count
+    const total = await Ticket.countDocuments(filter);
+
+    // Get paginated results
+    const tickets = await Ticket.find(filter)
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limitNum)
+      .populate([
         { path: 'creator', select: 'fullname email avatarUrl' },
         { path: 'assignedTo', select: 'fullname email avatarUrl jobTitle' }
-      ]
-    };
+      ])
+      .lean();
 
-    const result = await Ticket.paginate(filter, options);
+    const pages = Math.ceil(total / limitNum);
 
     res.json({
       success: true,
       data: {
-        tickets: result.docs,
+        tickets,
         pagination: {
-          page: result.page,
-          limit: result.limit,
-          total: result.totalDocs,
-          pages: result.totalPages
+          page: pageNum,
+          limit: limitNum,
+          total,
+          pages
         }
       }
     });
@@ -375,27 +383,35 @@ const getMyTickets = async (req, res) => {
     if (status) filter.status = status;
     if (category) filter.category = category;
 
-    const options = {
-      page: parseInt(page),
-      limit: parseInt(limit),
-      sort: { createdAt: -1 },
-      populate: [
+    const pageNum = parseInt(page);
+    const limitNum = parseInt(limit);
+    const skip = (pageNum - 1) * limitNum;
+
+    // Get total count
+    const total = await Ticket.countDocuments(filter);
+
+    // Get paginated results
+    const tickets = await Ticket.find(filter)
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limitNum)
+      .populate([
         { path: 'creator', select: 'fullname email avatarUrl' },
         { path: 'assignedTo', select: 'fullname email avatarUrl jobTitle' }
-      ]
-    };
+      ])
+      .lean();
 
-    const result = await Ticket.paginate(filter, options);
+    const pages = Math.ceil(total / limitNum);
 
     res.json({
       success: true,
       data: {
-        tickets: result.docs,
+        tickets,
         pagination: {
-          page: result.page,
-          limit: result.limit,
-          total: result.totalDocs,
-          pages: result.totalPages
+          page: pageNum,
+          limit: limitNum,
+          total,
+          pages
         }
       }
     });
