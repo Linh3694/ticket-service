@@ -92,14 +92,14 @@ supportTeamMemberSchema.statics.populateUserData = async function(members) {
     
     return {
       ...memberObj,
-      // Update userId with actual ObjectId if found in Users collection
-      userId: user?._id || memberObj.userId,
+      // Keep userId as email for frontend compatibility (combobox needs email to match options)
+      userId: memberObj.email,
       // Populate từ Users collection
       fullname: user?.fullname || memberObj.email,
       avatarUrl: user?.avatarUrl || '',
       department: user?.department || '',
       jobTitle: user?.jobTitle || 'User',
-      _id: user?._id  // Also add User._id for direct reference
+      userObjectId: user?._id  // Store User._id separately if needed
     };
   });
 };

@@ -156,9 +156,10 @@ const getTeamMemberFeedbackStats = async (req, res) => {
     }
 
     // Get ALL tickets assigned to this SupportTeamMember
-    // Don't use select() to ensure we get all nested feedback fields
+    // member._id is SupportTeamMember ObjectId, but assignedTo refers to User._id
+    // So we need to use member.userId (which is the User ObjectId)
     const allTickets = await Ticket.find({
-      assignedTo: member._id
+      assignedTo: member.userId
     }).lean();
 
     const totalTickets = allTickets.length;
@@ -325,9 +326,9 @@ const getTechnicalStats = async (req, res) => {
         }
 
         // Get all tickets assigned to this SupportTeamMember
-        // Don't use select() to ensure we get all nested feedback fields
+        // member._id is SupportTeamMember ObjectId, but assignedTo refers to User._id
         const allTickets = await Ticket.find({
-          assignedTo: member._id
+          assignedTo: member.userId
         }).lean();
 
         const totalTickets = allTickets.length;
