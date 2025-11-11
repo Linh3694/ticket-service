@@ -1,8 +1,33 @@
 const SupportTeamMember = require("../models/SupportTeamMember");
 const axios = require('axios');
+const mongoose = require('mongoose');
 
 // Frappe API configuration
 const FRAPPE_API_URL = process.env.FRAPPE_API_URL || 'http://172.16.20.130:8000';
+
+// Helper: Build query for finding member by email or ObjectId
+function buildMemberQuery(identifier) {
+  let query = {};
+  
+  if (mongoose.Types.ObjectId.isValid(identifier)) {
+    // If valid ObjectId, search by _id or userId field
+    query = {
+      $or: [
+        { _id: new mongoose.Types.ObjectId(identifier) },
+        { userId: new mongoose.Types.ObjectId(identifier) }
+      ],
+      isActive: true
+    };
+  } else {
+    // If not ObjectId, search by email only (don't try to query ObjectId field with string)
+    query = {
+      email: identifier,
+      isActive: true
+    };
+  }
+  
+  return query;
+}
 
 // Helper function to get user from Frappe
 async function getFrappeUser(userId, token) {
@@ -409,10 +434,7 @@ exports.updateTeamMemberRoles = async (req, res) => {
     }
     
     // Find member document (not populated, để có thể save)
-    const memberDoc = await SupportTeamMember.findOne({ 
-      $or: [{ userId }, { email: userId }],
-      isActive: true 
-    });
+    const memberDoc = await SupportTeamMember.findOne(buildMemberQuery(userId));
     
     if (!memberDoc) {
       return res.status(404).json({ 
@@ -532,10 +554,7 @@ exports.updateMemberStats = async (req, res) => {
     const { totalTickets, resolvedTickets, averageRating } = req.body;
     
     // Find member document (not populated, để có thể save)
-    const memberDoc = await SupportTeamMember.findOne({ 
-      $or: [{ userId }, { email: userId }],
-      isActive: true 
-    });
+    const memberDoc = await SupportTeamMember.findOne(buildMemberQuery(userId));
     
     if (!memberDoc) {
       return res.status(404).json({ 

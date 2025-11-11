@@ -120,14 +120,32 @@ supportTeamMemberSchema.statics.getMemberByEmail = async function(email) {
   return populated[0];
 };
 
-// DEPRECATED: Giữ lại để backward compatibility
+// Get member by userId (supports ObjectId, email, or userId string)
 supportTeamMemberSchema.statics.getMemberByUserId = async function(userId) {
-  const member = await this.findOne({ 
-    $or: [{ userId }, { email: userId }],
-    isActive: true 
-  }).lean();
+  let query = { isActive: true };
+
+  // Check if userId is a valid ObjectId
+  if (mongoose.Types.ObjectId.isValid(userId)) {
+    // If valid ObjectId, try to find by _id first, then by userId field
+    query = {
+      $or: [
+        { _id: new mongoose.Types.ObjectId(userId) },
+        { userId: new mongoose.Types.ObjectId(userId) },
+        { email: userId }
+      ],
+      isActive: true
+    };
+  } else {
+    // If not ObjectId, search by email only (don't try to query userId field with string value)
+    query = {
+      email: userId,
+      isActive: true
+    };
+  }
+
+  const member = await this.findOne(query).lean();
   if (!member) return null;
-  
+
   const populated = await this.populateUserData([member]);
   return populated[0];
 };
@@ -198,9 +216,22 @@ supportTeamMemberSchema.statics.createOrUpdate = async function(memberData) {
 
 // Xóa member (soft delete)
 supportTeamMemberSchema.statics.removeMember = async function(emailOrUserId) {
-  const member = await this.findOne({ 
-    $or: [{ email: emailOrUserId }, { userId: emailOrUserId }]
-  });
+  let query = {};
+  
+  // Check if emailOrUserId is a valid ObjectId
+  if (mongoose.Types.ObjectId.isValid(emailOrUserId)) {
+    query = {
+      $or: [
+        { _id: new mongoose.Types.ObjectId(emailOrUserId) },
+        { userId: new mongoose.Types.ObjectId(emailOrUserId) }
+      ]
+    };
+  } else {
+    // If not ObjectId, search by email only
+    query = { email: emailOrUserId };
+  }
+  
+  const member = await this.findOne(query);
   
   if (!member) {
     throw new Error('Member not found');
