@@ -4,6 +4,7 @@ const SupportTeamMember = require("../../models/SupportTeamMember");
 const notificationService = require('../../services/notificationService');
 const emailController = require('../emailController');
 const { TICKET_LOGS, SUBTASK_LOGS, OTHER_LOGS, normalizeVietnameseName, translateStatus } = require('../../utils/logFormatter');
+const { logTicketCreated, logTicketStatusChanged, logTicketAccepted, logTicketResolved, logTicketCancelled, logTicketReopened, logAPICall, logError } = require('../../utils/logger');
 const mongoose = require("mongoose");
 const axios = require('axios');
 const fs = require('fs');
@@ -280,6 +281,15 @@ const createTicket = async (req, res) => {
 
     await newTicket.save();
     console.log(`✅ [createTicket] Ticket created: ${newTicket._id}`);
+
+    // Log ticket creation
+    try {
+      const creatorEmail = req.user.email || 'unknown';
+      const creatorName = req.user.fullname || req.user.email || 'unknown';
+      logTicketCreated(creatorEmail, creatorName, newTicket._id.toString(), title, category);
+    } catch (logErr) {
+      console.warn('⚠️  Failed to log ticket creation:', logErr.message);
+    }
 
     // 3️⃣ Move uploaded files from temp folder to ticket folder if any
     if (req.files && req.files.length > 0) {
@@ -913,6 +923,15 @@ const cancelTicketWithReason = async (req, res) => {
     });
 
     await ticket.save();
+
+    // Log cancellation
+    try {
+      const userEmail = req.user.email || 'unknown';
+      const userName = req.user.fullname || req.user.email || 'unknown';
+      logTicketCancelled(userEmail, userName, ticket._id.toString(), cancelReason.trim());
+    } catch (logErr) {
+      console.warn('⚠️  Failed to log ticket cancellation:', logErr.message);
+    }
     
     // Populate for response
     await ticket.populate('creator', 'fullname email avatarUrl jobTitle department');
@@ -985,6 +1004,15 @@ const reopenTicket = async (req, res) => {
     });
 
     await ticket.save();
+
+    // Log reopening
+    try {
+      const userEmail = req.user.email || 'unknown';
+      const userName = req.user.fullname || req.user.email || 'unknown';
+      logTicketReopened(userEmail, userName, ticket._id.toString(), previousStatus);
+    } catch (logErr) {
+      console.warn('⚠️  Failed to log ticket reopening:', logErr.message);
+    }
     
     // Populate for response
     await ticket.populate('creator', 'fullname email avatarUrl jobTitle department');

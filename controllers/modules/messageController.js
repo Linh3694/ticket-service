@@ -1,5 +1,6 @@
 const Ticket = require("../../models/Ticket");
 const { TICKET_LOGS } = require('../../utils/logFormatter');
+const { logMessageSent, logTicketStatusChanged } = require('../../utils/logger');
 const { Types } = require('mongoose');
 
 /**
@@ -124,6 +125,26 @@ const sendMessage = async (req, res) => {
 
     ticket.updatedAt = new Date();
     await ticket.save();
+
+    // Log message sent
+    try {
+      const userEmail = req.user.email || 'unknown';
+      const userName = req.user.fullname || req.user.email || 'unknown';
+      logMessageSent(userEmail, userName, ticketId, (text || '').length, images.length > 0);
+    } catch (logErr) {
+      console.warn('⚠️  Failed to log message sent:', logErr.message);
+    }
+
+    // Log status change if any
+    if (statusChanged) {
+      try {
+        const userEmail = req.user.email || 'unknown';
+        const userName = req.user.fullname || req.user.email || 'unknown';
+        logTicketStatusChanged(userEmail, userName, ticketId, oldStatus, newStatus);
+      } catch (logErr) {
+        console.warn('⚠️  Failed to log status change:', logErr.message);
+      }
+    }
 
     // Broadcast new message to WebSocket clients (EXCEPT sender)
     // Sender already has optimistic message and receives via onSuccess
