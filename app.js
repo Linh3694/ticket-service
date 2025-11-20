@@ -32,16 +32,20 @@ const io = new Server(server, {
 // Make io accessible in controllers via req.app.get('io')
 app.set('io', io);
 
-// Setup Redis adapter
+// Setup Redis adapter (optional)
 (async () => {
   try {
     console.log('🔗 [Ticket Service] Setting up Redis adapter...');
     await redisClient.connect();
-    
-    io.adapter(createAdapter(redisClient.getPubClient(), redisClient.getSubClient()));
-    console.log('✅ [Ticket Service] Redis adapter setup complete');
+
+    if (redisClient.isRedisAvailable()) {
+      io.adapter(createAdapter(redisClient.getPubClient(), redisClient.getSubClient()));
+      console.log('✅ [Ticket Service] Redis adapter setup complete');
+    } else {
+      console.log('ℹ️ [Ticket Service] Redis not available, using default Socket.IO adapter');
+    }
   } catch (error) {
-    console.warn('⚠️ [Ticket Service] Redis adapter setup failed:', error.message);
+    console.warn('⚠️ [Ticket Service] Redis adapter setup failed, using default adapter:', error.message);
   }
 })();
 
@@ -119,12 +123,18 @@ app.get('/health', async (req, res) => {
       healthStatus.database_error = error.message;
     }
 
-    // Kiểm tra Redis
+    // Kiểm tra Redis (optional service)
     try {
-      await redisClient.client.ping();
-      healthStatus.redis = 'connected';
+      if (redisClient.isRedisAvailable() && redisClient.client) {
+        await redisClient.client.ping();
+        healthStatus.redis = 'connected';
+      } else {
+        healthStatus.redis = 'unavailable';
+        healthStatus.redis_note = 'Redis is optional, service continues to work without caching';
+      }
     } catch (error) {
-      healthStatus.redis = 'error';
+      healthStatus.redis = 'unavailable';
+      healthStatus.redis_note = 'Redis is optional, service continues to work without caching';
       healthStatus.redis_error = error.message;
     }
 
@@ -135,16 +145,20 @@ app.get('/health', async (req, res) => {
       healthStatus.notification_error = notificationHealth.message;
     }
 
-    // Xác định status tổng thể
-    const criticalServices = ['database', 'redis'];
-    const hasCriticalError = criticalServices.some(service => 
+    // Xác định status tổng thể - chỉ database là critical
+    const criticalServices = ['database'];
+    const hasCriticalError = criticalServices.some(service =>
       healthStatus[service] === 'error'
     );
 
     if (hasCriticalError) {
-      healthStatus.status = 'degraded';
+      healthStatus.status = 'error';
       res.status(503).json(healthStatus);
+    } else if (healthStatus.redis === 'unavailable') {
+      healthStatus.status = 'degraded';
+      res.status(200).json(healthStatus); // Redis unavailable is not a critical error
     } else {
+      healthStatus.status = 'ok';
       res.status(200).json(healthStatus);
     }
   } catch (error) {

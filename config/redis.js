@@ -8,9 +8,18 @@ class RedisClient {
     this.subClient = null; // for socket.io adapter
     this.userSubClient = null; // dedicated subscriber for business channels
     this.secondarySubClient = null; // optional subscriber for Frappe's own Redis
+    this.isConnected = false;
+    this.isConnecting = false;
   }
 
   async connect() {
+    if (this.isConnecting) {
+      console.log('[Ticket Service] Redis connection already in progress');
+      return;
+    }
+
+    this.isConnecting = true;
+
     try {
       const url = process.env.REDIS_URL;
       const host = process.env.REDIS_HOST || '127.0.0.1';
@@ -37,15 +46,39 @@ class RedisClient {
       console.log(`[Ticket Service] Connecting to Redis at ${target}`);
       if (password) console.log('[Ticket Service] Redis password: set');
 
-      this.client.on('error', (err) => console.error('[Ticket Service] Redis client error:', err.message));
-      this.pubClient.on('error', (err) => console.error('[Ticket Service] Redis pub error:', err.message));
-      this.subClient.on('error', (err) => console.error('[Ticket Service] Redis sub error:', err.message));
-      this.userSubClient.on('error', (err) => console.error('[Ticket Service] Redis user-sub error:', err.message));
+      this.client.on('error', (err) => {
+        console.error('[Ticket Service] Redis client error:', err.message);
+        this.isConnected = false;
+      });
+      this.pubClient.on('error', (err) => {
+        console.error('[Ticket Service] Redis pub error:', err.message);
+        this.isConnected = false;
+      });
+      this.subClient.on('error', (err) => {
+        console.error('[Ticket Service] Redis sub error:', err.message);
+        this.isConnected = false;
+      });
+      this.userSubClient.on('error', (err) => {
+        console.error('[Ticket Service] Redis user-sub error:', err.message);
+        this.isConnected = false;
+      });
 
-      this.client.on('ready', () => console.log('[Ticket Service] Redis client ready'));
-      this.pubClient.on('ready', () => console.log('[Ticket Service] Redis pub ready'));
-      this.subClient.on('ready', () => console.log('[Ticket Service] Redis sub ready'));
-      this.userSubClient.on('ready', () => console.log('[Ticket Service] Redis user-sub ready'));
+      this.client.on('ready', () => {
+        console.log('[Ticket Service] Redis client ready');
+        this.isConnected = true;
+      });
+      this.pubClient.on('ready', () => {
+        console.log('[Ticket Service] Redis pub ready');
+        this.isConnected = true;
+      });
+      this.subClient.on('ready', () => {
+        console.log('[Ticket Service] Redis sub ready');
+        this.isConnected = true;
+      });
+      this.userSubClient.on('ready', () => {
+        console.log('[Ticket Service] Redis user-sub ready');
+        this.isConnected = true;
+      });
 
       await this.client.connect();
       await this.pubClient.connect();
@@ -53,6 +86,7 @@ class RedisClient {
       await this.userSubClient.connect();
 
       console.log('✅ [Ticket Service] Redis connected successfully');
+      this.isConnected = true;
 
       // Optional: connect secondary subscriber to Frappe's Redis (e.g., redis_socketio)
       const frappeUrl = process.env.FRAPPE_REDIS_URL || process.env.FRAPPE_REDIS_SOCKETIO;
@@ -82,74 +116,127 @@ class RedisClient {
         }
       }
     } catch (error) {
-      console.error('❌ [Ticket Service] Redis connection failed:', error.message);
-      throw error;
+      console.warn('⚠️ [Ticket Service] Redis connection failed, service will continue without Redis:', error.message);
+      this.isConnected = false;
+      // Don't throw error - Redis is optional
+    } finally {
+      this.isConnecting = false;
     }
   }
 
   async set(key, value, ttl = null) {
-    const stringValue = typeof value === 'object' ? JSON.stringify(value) : value;
-    if (ttl) {
-      await this.client.setEx(key, ttl, stringValue);
-    } else {
-      await this.client.set(key, stringValue);
+    if (!this.isConnected || !this.client) {
+      console.warn('[Ticket Service] Redis not available, skipping set operation');
+      return;
+    }
+
+    try {
+      const stringValue = typeof value === 'object' ? JSON.stringify(value) : value;
+      if (ttl) {
+        await this.client.setEx(key, ttl, stringValue);
+      } else {
+        await this.client.set(key, stringValue);
+      }
+    } catch (error) {
+      console.warn('[Ticket Service] Redis set operation failed:', error.message);
     }
   }
 
   async get(key) {
-    const value = await this.client.get(key);
+    if (!this.isConnected || !this.client) {
+      console.warn('[Ticket Service] Redis not available, skipping get operation');
+      return null;
+    }
+
     try {
-      return JSON.parse(value);
-    } catch {
-      return value;
+      const value = await this.client.get(key);
+      try {
+        return JSON.parse(value);
+      } catch {
+        return value;
+      }
+    } catch (error) {
+      console.warn('[Ticket Service] Redis get operation failed:', error.message);
+      return null;
     }
   }
 
   async del(key) {
-    await this.client.del(key);
+    if (!this.isConnected || !this.client) {
+      console.warn('[Ticket Service] Redis not available, skipping del operation');
+      return;
+    }
+
+    try {
+      await this.client.del(key);
+    } catch (error) {
+      console.warn('[Ticket Service] Redis del operation failed:', error.message);
+    }
   }
 
   async publish(channel, message) {
-    const stringMessage = typeof message === 'object' ? JSON.stringify(message) : message;
-    await this.pubClient.publish(channel, stringMessage);
+    if (!this.isConnected || !this.pubClient) {
+      console.warn('[Ticket Service] Redis not available, skipping publish operation');
+      return;
+    }
+
+    try {
+      const stringMessage = typeof message === 'object' ? JSON.stringify(message) : message;
+      await this.pubClient.publish(channel, stringMessage);
+    } catch (error) {
+      console.warn('[Ticket Service] Redis publish operation failed:', error.message);
+    }
   }
 
   async subscribe(channel, callback) {
-    console.log(`[Ticket Service] Subscribing to channel: ${channel}`);
-    await this.userSubClient.subscribe(channel, (message) => {
-      try {
-        const parsedMessage = JSON.parse(message);
-        if (process.env.DEBUG_USER_EVENTS === '1') {
-          console.log('[Ticket Service] Message received on', channel, '=>', typeof parsedMessage === 'object' ? Object.keys(parsedMessage) : typeof parsedMessage);
+    if (!this.isConnected || !this.userSubClient) {
+      console.warn('[Ticket Service] Redis not available, skipping subscribe operation');
+      return;
+    }
+
+    try {
+      console.log(`[Ticket Service] Subscribing to channel: ${channel}`);
+      await this.userSubClient.subscribe(channel, (message) => {
+        try {
+          const parsedMessage = JSON.parse(message);
+          if (process.env.DEBUG_USER_EVENTS === '1') {
+            console.log('[Ticket Service] Message received on', channel, '=>', typeof parsedMessage === 'object' ? Object.keys(parsedMessage) : typeof parsedMessage);
+          }
+          callback(parsedMessage);
+        } catch {
+          if (process.env.DEBUG_USER_EVENTS === '1') {
+            console.log('[Ticket Service] Raw message received on', channel);
+          }
+          callback(message);
         }
-        callback(parsedMessage);
-      } catch {
-        if (process.env.DEBUG_USER_EVENTS === '1') {
-          console.log('[Ticket Service] Raw message received on', channel);
-        }
-        callback(message);
-      }
-    });
+      });
+    } catch (error) {
+      console.warn('[Ticket Service] Redis subscribe operation failed:', error.message);
+    }
   }
 
   async subscribeMulti(channel, callback) {
     console.log(`[Ticket Service] Subscribing (multi) to channel: ${channel}`);
     await this.subscribe(channel, callback);
-    if (this.secondarySubClient) {
-      await this.secondarySubClient.subscribe(channel, (message) => {
-        try {
-          const parsedMessage = JSON.parse(message);
-          if (process.env.DEBUG_USER_EVENTS === '1') {
-            console.log('[Ticket Service] (secondary) Message received on', channel, '=>', typeof parsedMessage === 'object' ? Object.keys(parsedMessage) : typeof parsedMessage);
+    if (this.secondarySubClient && this.isConnected) {
+      try {
+        await this.secondarySubClient.subscribe(channel, (message) => {
+          try {
+            const parsedMessage = JSON.parse(message);
+            if (process.env.DEBUG_USER_EVENTS === '1') {
+              console.log('[Ticket Service] (secondary) Message received on', channel, '=>', typeof parsedMessage === 'object' ? Object.keys(parsedMessage) : typeof parsedMessage);
+            }
+            callback(parsedMessage);
+          } catch {
+            if (process.env.DEBUG_USER_EVENTS === '1') {
+              console.log('[Ticket Service] (secondary) Raw message received on', channel);
+            }
+            callback(message);
           }
-          callback(parsedMessage);
-        } catch {
-          if (process.env.DEBUG_USER_EVENTS === '1') {
-            console.log('[Ticket Service] (secondary) Raw message received on', channel);
-          }
-          callback(message);
-        }
-      });
+        });
+      } catch (error) {
+        console.warn('[Ticket Service] Redis secondary subscribe operation failed:', error.message);
+      }
     }
   }
 
@@ -224,17 +311,32 @@ class RedisClient {
   }
 
   async getOnlineAgents() {
-    const pattern = 'agent:online:*';
-    const keys = await this.client.keys(pattern);
-    const agents = [];
-    
-    for (const key of keys) {
-      const agentId = key.split(':')[2];
-      const data = await this.get(key);
-      agents.push({ agentId, ...data });
+    if (!this.isConnected || !this.client) {
+      console.warn('[Ticket Service] Redis not available, returning empty agent list');
+      return [];
     }
-    
-    return agents;
+
+    try {
+      const pattern = 'agent:online:*';
+      const keys = await this.client.keys(pattern);
+      const agents = [];
+
+      for (const key of keys) {
+        const agentId = key.split(':')[2];
+        const data = await this.get(key);
+        agents.push({ agentId, ...data });
+      }
+
+      return agents;
+    } catch (error) {
+      console.warn('[Ticket Service] Redis getOnlineAgents operation failed:', error.message);
+      return [];
+    }
+  }
+
+  // Check if Redis is available
+  isRedisAvailable() {
+    return this.isConnected;
   }
 
   getPubClient() {
