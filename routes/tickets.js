@@ -7,11 +7,17 @@ const { upload, handleUploadError } = require("../middleware/uploadTicket");
 // Ticket routes
 // ⚠️ IMPORTANT: Order matters! More specific routes BEFORE dynamic ones (:ticketId)
 
-// Static routes
-router.post("/", authenticate, upload.array("attachments", 15), handleUploadError, ticketController.createTicket);
+// Internal routes for service-to-service communication (no authentication required)
+const internalRouter = express.Router();
 
-// Internal route for email service (no authentication required)
-router.post("/from-email", ticketController.createTicketFromEmail);
+// Email service integration routes
+internalRouter.post("/from-email", ticketController.createTicketFromEmail);
+
+// Mount internal routes without authentication
+router.use("/internal", internalRouter);
+
+// Regular routes with authentication
+router.post("/", authenticate, upload.array("attachments", 15), handleUploadError, ticketController.createTicket);
 router.get("/categories", ticketController.getTicketCategories);
 router.get("/debug/team-members", authenticate, ticketController.debugTeamMembers);
 router.get("/technical-stats/:userId", ticketController.getTechnicalStats);
