@@ -145,6 +145,30 @@ const sendMessage = async (req, res) => {
       } catch (logErr) {
         console.warn('⚠️  Failed to log status change:', logErr.message);
       }
+
+      // Send email notification to customer when support team changes status
+      if (isAssignedTo && ticket.creator?.email) {
+        try {
+          const emailServiceUrl = process.env.EMAIL_SERVICE_URL || 'http://localhost:5030';
+          console.log(`📧 [sendMessage] Support team changed status, sending email to ${ticket.creator.email}`);
+
+          // Call email service asynchronously
+          const axios = require('axios');
+          axios.post(`${emailServiceUrl}/notify-ticket-status`, {
+            ticketId: ticket._id.toString(),
+            recipientEmail: ticket.creator.email
+          }, {
+            timeout: 10000,
+            headers: { 'Content-Type': 'application/json' }
+          }).then(response => {
+            console.log(`✅ [sendMessage] Status change email sent to customer:`, response.data);
+          }).catch(error => {
+            console.error(`❌ [sendMessage] Failed to send status change email:`, error.message);
+          });
+        } catch (emailErr) {
+          console.warn('⚠️ [sendMessage] Failed to initiate status change email:', emailErr.message);
+        }
+      }
     }
 
     // Broadcast new message to WebSocket clients (EXCEPT sender)

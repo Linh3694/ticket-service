@@ -1152,7 +1152,8 @@ const assignTicketToMe = async (req, res) => {
     const previousAssigneeId = ticket.assignedTo;
 
     // Update ticket
-    console.log(`🔄 [assignTicketToMe] Before update: assignedTo=${ticket.assignedTo}, userId=${userId}`);
+    const oldStatus = ticket.status;
+    console.log(`🔄 [assignTicketToMe] Before update: assignedTo=${ticket.assignedTo}, status=${oldStatus}, userId=${userId}`);
     ticket.assignedTo = userId;
     ticket.status = 'Processing';
     ticket.acceptedAt = new Date();
@@ -1200,6 +1201,29 @@ const assignTicketToMe = async (req, res) => {
           jobTitle: req.user.jobTitle || '',
           department: req.user.department || ''
         };
+      }
+    }
+
+    // Send email notification to creator when ticket is accepted by support team
+    if (ticket.creator?.email && oldStatus !== ticket.status) {
+      try {
+        const emailServiceUrl = process.env.EMAIL_SERVICE_URL || 'http://localhost:5030';
+        console.log(`📧 [assignTicketToMe] Support team accepted ticket, sending email to ${ticket.creator.email}`);
+
+        // Call email service asynchronously
+        axios.post(`${emailServiceUrl}/notify-ticket-status`, {
+          ticketId: ticket._id.toString(),
+          recipientEmail: ticket.creator.email
+        }, {
+          timeout: 10000,
+          headers: { 'Content-Type': 'application/json' }
+        }).then(response => {
+          console.log(`✅ [assignTicketToMe] Status change email sent to creator:`, response.data);
+        }).catch(error => {
+          console.error(`❌ [assignTicketToMe] Failed to send status change email:`, error.message);
+        });
+      } catch (emailErr) {
+        console.warn('⚠️ [assignTicketToMe] Failed to initiate status change email:', emailErr.message);
       }
     }
 
@@ -1281,6 +1305,29 @@ const cancelTicketWithReason = async (req, res) => {
     if (ticket.assignedTo === null && ticket._id) {
       console.log(`⚠️  [cancelTicketWithReason] assignedTo is null after populate, fetching...`);
       await fixAssignedToIfNull(ticket);
+    }
+
+    // Send email notification to creator when ticket is cancelled
+    if (ticket.creator?.email) {
+      try {
+        const emailServiceUrl = process.env.EMAIL_SERVICE_URL || 'http://localhost:5030';
+        console.log(`📧 [cancelTicketWithReason] Ticket cancelled, sending email to ${ticket.creator.email}`);
+
+        // Call email service asynchronously
+        axios.post(`${emailServiceUrl}/notify-ticket-status`, {
+          ticketId: ticket._id.toString(),
+          recipientEmail: ticket.creator.email
+        }, {
+          timeout: 10000,
+          headers: { 'Content-Type': 'application/json' }
+        }).then(response => {
+          console.log(`✅ [cancelTicketWithReason] Cancellation email sent to creator:`, response.data);
+        }).catch(error => {
+          console.error(`❌ [cancelTicketWithReason] Failed to send cancellation email:`, error.message);
+        });
+      } catch (emailErr) {
+        console.warn('⚠️ [cancelTicketWithReason] Failed to initiate cancellation email:', emailErr.message);
+      }
     }
 
     res.json({
