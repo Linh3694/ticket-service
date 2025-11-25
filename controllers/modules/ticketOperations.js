@@ -190,7 +190,7 @@ const createTicketFromEmail = async (req, res) => {
 
     try {
       // Find support team members for 'Email Ticket' category
-      const SupportTeamMember = require('../models/SupportTeamMember');
+      // SupportTeamMember already imported at top of file
       const supportMembers = await SupportTeamMember.find({
         isActive: true,
         roles: { $in: ['Email Ticket'] } // Email tickets go to members with Email Ticket role
