@@ -667,7 +667,7 @@ const updateTicket = async (req, res) => {
 
       // 📧 Send email notification when status changes
       try {
-        const emailServiceUrl = process.env.EMAIL_SERVICE_URL || 'https://admin.sis.wellspring.edu.vn/api/email';
+        const emailServiceUrl = process.env.EMAIL_SERVICE_URL || 'http://localhost:5030';
         const recipientEmail = ticket.creator.email;
 
         console.log(`📧 [updateTicket] Sending status change email for ticket ${ticket.ticketCode} to ${recipientEmail}`);
