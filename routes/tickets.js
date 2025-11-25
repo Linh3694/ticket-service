@@ -12,6 +12,7 @@ const internalRouter = express.Router();
 
 // Email service integration routes
 internalRouter.post("/from-email", ticketController.createTicketFromEmail);
+internalRouter.get("/info/:ticketId", ticketController.getTicketInfoForEmail);
 
 // Mount internal routes without authentication
 router.use("/internal", internalRouter);

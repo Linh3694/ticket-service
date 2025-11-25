@@ -851,6 +851,62 @@ const getTicketById = async (req, res) => {
 };
 
 /**
+ * Get ticket info for email service (internal endpoint - no auth required)
+ */
+const getTicketInfoForEmail = async (req, res) => {
+  const { ticketId } = req.params;
+
+  try {
+    console.log(`🔍 [getTicketInfoForEmail] Getting ticket info for email service: ${ticketId}`);
+
+    const ticket = await Ticket.findById(ticketId)
+      .populate('creator', 'fullname email avatarUrl jobTitle department')
+      .populate('assignedTo', '_id fullname email avatarUrl jobTitle department')
+      .lean();
+
+    if (!ticket) {
+      return res.status(404).json({ success: false, message: "Ticket not found" });
+    }
+
+    // Return only necessary fields for email template
+    const ticketInfo = {
+      _id: ticket._id,
+      ticketCode: ticket.ticketCode,
+      title: ticket.title,
+      description: ticket.description,
+      status: ticket.status,
+      category: ticket.category,
+      priority: ticket.priority,
+      creator: {
+        fullname: ticket.creator?.fullname,
+        email: ticket.creator?.email
+      },
+      assignedTo: ticket.assignedTo ? {
+        fullname: ticket.assignedTo?.fullname,
+        email: ticket.assignedTo?.email
+      } : null,
+      createdAt: ticket.createdAt,
+      updatedAt: ticket.updatedAt,
+      closedAt: ticket.closedAt
+    };
+
+    console.log(`✅ [getTicketInfoForEmail] Found ticket: ${ticket.ticketCode} (${ticket.status})`);
+
+    res.json({
+      success: true,
+      data: ticketInfo
+    });
+
+  } catch (error) {
+    console.error(`❌ [getTicketInfoForEmail] Error:`, error.message);
+    res.status(500).json({
+      success: false,
+      message: "Internal server error"
+    });
+  }
+};
+
+/**
  * Update ticket
  */
 const updateTicket = async (req, res) => {
