@@ -194,7 +194,7 @@ const createTicketFromEmail = async (req, res) => {
       const supportMembers = await SupportTeamMember.find({
         isActive: true,
         roles: { $in: ['Email Ticket'] } // Email tickets go to members with Email Ticket role
-      }).populate('user', 'fullname email avatarUrl jobTitle department');
+      }).populate('userId', 'fullname email avatarUrl jobTitle department');
 
       if (supportMembers && supportMembers.length > 0) {
         // Find member with least active tickets (simple load balancing)
@@ -202,9 +202,9 @@ const createTicketFromEmail = async (req, res) => {
         let minTickets = Infinity;
 
         for (const member of supportMembers) {
-          if (member.user) {
+          if (member.userId) {
             const activeTickets = await Ticket.countDocuments({
-              assignedTo: member.user._id,
+              assignedTo: member.userId._id,
               status: { $in: ['Assigned', 'Processing', 'Waiting for Customer'] }
             });
 
@@ -215,9 +215,9 @@ const createTicketFromEmail = async (req, res) => {
           }
         }
 
-        if (bestMember && bestMember.user) {
-          assignedTo = bestMember.user._id;
-          console.log(`[createTicketFromEmail] ✅ Auto-assigned to: ${bestMember.user.fullname} (${bestMember.user.email})`);
+        if (bestMember && bestMember.userId) {
+          assignedTo = bestMember.userId._id;
+          console.log(`[createTicketFromEmail] ✅ Auto-assigned to: ${bestMember.userId.fullname} (${bestMember.userId.email})`);
           console.log(`[createTicketFromEmail] 📊 Member has ${minTickets} active tickets`);
         } else {
           console.log('[createTicketFromEmail] ⚠️ No suitable support member found for auto-assignment');
