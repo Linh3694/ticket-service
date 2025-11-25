@@ -156,6 +156,10 @@ const createTicketFromEmail = async (req, res) => {
       });
     }
 
+    // Import helper functions
+    const { generateTicketCode } = require('../../utils/ticketHelper');
+    const { TICKET_LOGS } = require('../../utils/logFormatter');
+
     console.log('[createTicketFromEmail] 🔄 Generating ticket code...');
     const ticketCode = await generateTicketCode();
     console.log(`[createTicketFromEmail] ✅ Generated ticket code: ${ticketCode}`);
