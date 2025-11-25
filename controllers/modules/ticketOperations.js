@@ -164,6 +164,15 @@ const createTicketFromEmail = async (req, res) => {
     const ticketCode = await generateTicketCode('Email Ticket');
     console.log(`[createTicketFromEmail] ✅ Generated ticket code: ${ticketCode}`);
 
+    // Ensure we have a valid creator
+    if (!creatorId) {
+      console.log('[createTicketFromEmail] ⚠️ No creator ID provided, cannot create ticket');
+      return res.status(400).json({
+        success: false,
+        message: 'Creator ID is required'
+      });
+    }
+
     console.log('[createTicketFromEmail] 🎫 Creating ticket object...');
 
     // Create ticket
@@ -172,9 +181,9 @@ const createTicketFromEmail = async (req, res) => {
       title: subject,
       description: plainContent,
       category: 'Email Ticket',
-      status: 'New',
+      status: 'Assigned', // Use valid enum value instead of 'New'
       priority: priority,
-      creator: creatorId || null,
+      creator: creatorId,
       source: 'email',
       emailId: emailId,
       attachments: attachments || [],
