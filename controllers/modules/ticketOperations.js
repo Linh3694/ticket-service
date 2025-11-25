@@ -136,6 +136,7 @@ async function populateAssignedToData(tickets) {
 const createTicketFromEmail = async (req, res) => {
   try {
     console.log('[createTicketFromEmail] Creating ticket from email...');
+    console.log('[createTicketFromEmail] Request body:', JSON.stringify(req.body, null, 2));
 
     const {
       id: emailId,
@@ -148,15 +149,22 @@ const createTicketFromEmail = async (req, res) => {
 
     // Validate required fields
     if (!subject || !plainContent) {
+      console.log('[createTicketFromEmail] ❌ Validation failed: missing subject or content');
       return res.status(400).json({
         success: false,
         message: 'Subject and content are required'
       });
     }
 
+    console.log('[createTicketFromEmail] 🔄 Generating ticket code...');
+    const ticketCode = await generateTicketCode();
+    console.log(`[createTicketFromEmail] ✅ Generated ticket code: ${ticketCode}`);
+
+    console.log('[createTicketFromEmail] 🎫 Creating ticket object...');
+
     // Create ticket
     const ticket = new Ticket({
-      ticketCode: await generateTicketCode(),
+      ticketCode: ticketCode,
       title: subject,
       description: plainContent,
       category: 'Email Ticket',
@@ -173,10 +181,17 @@ const createTicketFromEmail = async (req, res) => {
       }]
     });
 
+    console.log('[createTicketFromEmail] 💾 Saving ticket to database...');
     await ticket.save();
+    console.log(`[createTicketFromEmail] ✅ Ticket saved with ID: ${ticket._id}`);
 
     // Populate creator for response
-    await ticket.populate('creator', 'fullname email avatarUrl jobTitle department');
+    try {
+      await ticket.populate('creator', 'fullname email avatarUrl jobTitle department');
+      console.log('[createTicketFromEmail] ✅ Creator populated');
+    } catch (populateError) {
+      console.log('[createTicketFromEmail] ⚠️ Creator populate failed:', populateError.message);
+    }
 
     console.log(`[createTicketFromEmail] ✅ Created ticket ${ticket.ticketCode} from email`);
 
@@ -187,7 +202,8 @@ const createTicketFromEmail = async (req, res) => {
     });
 
   } catch (error) {
-    console.error('[createTicketFromEmail] Error:', error);
+    console.error('[createTicketFromEmail] ❌ Error:', error);
+    console.error('[createTicketFromEmail] Stack:', error.stack);
     res.status(500).json({
       success: false,
       message: 'Failed to create ticket from email',
