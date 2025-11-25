@@ -184,6 +184,52 @@ const createTicketFromEmail = async (req, res) => {
 
     console.log('[createTicketFromEmail] 🎫 Creating ticket object...');
 
+    // Auto-assign email tickets to support team
+    console.log('[createTicketFromEmail] 🔄 Auto-assigning email ticket to support team...');
+    let assignedTo = null;
+
+    try {
+      // Find support team members for 'Email Ticket' category
+      const SupportTeamMember = require('../models/SupportTeamMember');
+      const supportMembers = await SupportTeamMember.find({
+        active: true,
+        roles: { $in: ['Overall'] } // Email tickets go to Overall support
+      }).populate('user', 'fullname email avatarUrl jobTitle department');
+
+      if (supportMembers && supportMembers.length > 0) {
+        // Find member with least active tickets (simple load balancing)
+        let bestMember = null;
+        let minTickets = Infinity;
+
+        for (const member of supportMembers) {
+          if (member.user) {
+            const activeTickets = await Ticket.countDocuments({
+              assignedTo: member.user._id,
+              status: { $in: ['Assigned', 'Processing', 'Waiting for Customer'] }
+            });
+
+            if (activeTickets < minTickets) {
+              minTickets = activeTickets;
+              bestMember = member;
+            }
+          }
+        }
+
+        if (bestMember && bestMember.user) {
+          assignedTo = bestMember.user._id;
+          console.log(`[createTicketFromEmail] ✅ Auto-assigned to: ${bestMember.user.fullname} (${bestMember.user.email})`);
+          console.log(`[createTicketFromEmail] 📊 Member has ${minTickets} active tickets`);
+        } else {
+          console.log('[createTicketFromEmail] ⚠️ No suitable support member found for auto-assignment');
+        }
+      } else {
+        console.log('[createTicketFromEmail] ⚠️ No active support team members found');
+      }
+    } catch (assignError) {
+      console.log('[createTicketFromEmail] ⚠️ Error during auto-assignment:', assignError.message);
+      // Continue without assignment
+    }
+
     // Create ticket
     const ticket = new Ticket({
       ticketCode: ticketCode,
@@ -193,6 +239,7 @@ const createTicketFromEmail = async (req, res) => {
       status: 'Assigned', // Use valid enum value instead of 'New'
       priority: priority,
       creator: creatorId,
+      assignedTo: assignedTo, // Auto-assigned support member
       source: 'email',
       emailId: emailId,
       attachments: attachments || [],
