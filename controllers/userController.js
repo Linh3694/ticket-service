@@ -639,6 +639,48 @@ exports.webhookUserChanged = async (req, res) => {
   }
 };
 
+// Get user by email (for email service)
+const getUserByEmail = async (req, res) => {
+  try {
+    const { email } = req.params;
+
+    console.log(`[getUserByEmail] Looking for user with email: ${email}`);
+
+    if (!email) {
+      console.log('[getUserByEmail] ❌ Missing email parameter');
+      return res.status(400).json({
+        success: false,
+        message: 'Email parameter is required'
+      });
+    }
+
+    // Find user by email
+    const user = await User.findOne({ email: email.toLowerCase() });
+
+    if (user) {
+      console.log(`[getUserByEmail] ✅ Found user: ${user._id} (${user.fullname || user.email})`);
+      return res.status(200).json({
+        success: true,
+        user: user,
+        message: 'User found'
+      });
+    } else {
+      console.log(`[getUserByEmail] ❌ User not found for email: ${email}`);
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+  } catch (error) {
+    console.error('[getUserByEmail] ❌ Error:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+};
+
 // Create user from email (for email service)
 const createUserFromEmail = async (req, res) => {
   try {
@@ -703,4 +745,5 @@ const createUserFromEmail = async (req, res) => {
   }
 };
 
+module.exports.getUserByEmail = getUserByEmail;
 module.exports.createUserFromEmail = createUserFromEmail;

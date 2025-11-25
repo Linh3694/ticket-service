@@ -160,6 +160,15 @@ const createTicketFromEmail = async (req, res) => {
     const { generateTicketCode } = require('../../utils/ticketHelper');
     const { TICKET_LOGS } = require('../../utils/logFormatter');
 
+    // Creator is required for email tickets
+    if (!creatorId) {
+      console.log('[createTicketFromEmail] ❌ No creator ID provided');
+      return res.status(400).json({
+        success: false,
+        message: 'Creator ID is required'
+      });
+    }
+
     console.log('[createTicketFromEmail] 🔄 Generating ticket code...');
     const ticketCode = await generateTicketCode('Email Ticket');
     console.log(`[createTicketFromEmail] ✅ Generated ticket code: ${ticketCode}`);
@@ -224,6 +233,43 @@ const createTicketFromEmail = async (req, res) => {
     });
   }
 };
+
+// Helper function to get or create system user for email tickets
+async function getOrCreateSystemUser() {
+  try {
+    const User = require('../models/Users');
+
+    // Try to find existing system user
+    let systemUser = await User.findOne({ email: 'system@email.wellspring.edu.vn' });
+
+    if (!systemUser) {
+      // Create system user if not exists
+      systemUser = new User({
+        email: 'system@email.wellspring.edu.vn',
+        fullname: 'Email System',
+        role: 'system',
+        provider: 'system',
+        active: true,
+        disabled: false,
+        roles: [],
+        frappeUserId: null,
+        employeeCode: null,
+        jobTitle: 'System User',
+        department: 'IT Support',
+        avatarUrl: '',
+        microsoftId: null
+      });
+
+      await systemUser.save();
+      console.log('[getOrCreateSystemUser] ✅ Created system user for email tickets');
+    }
+
+    return systemUser;
+  } catch (error) {
+    console.error('[getOrCreateSystemUser] ❌ Error creating/finding system user:', error);
+    throw error;
+  }
+}
 
 // Frappe API configuration
 const FRAPPE_API_URL = process.env.FRAPPE_API_URL || 'https://admin.sis.wellspring.edu.vn';
