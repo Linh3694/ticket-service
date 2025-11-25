@@ -888,6 +888,8 @@ const updateTicket = async (req, res) => {
 
     // 📝 Log status change
     if (updates.status && updates.status !== ticket.status) {
+      console.log(`📝 [updateTicket] Status change detected: ${previousStatus} -> ${updates.status}`);
+
       const userName = req.user.fullname || req.user.email; // LOG sẽ tự normalize
       ticket.history.push({
         timestamp: new Date(),
@@ -898,15 +900,25 @@ const updateTicket = async (req, res) => {
       // Set acceptedAt khi status chuyển sang "Processing"
       if (updates.status === "Processing" && !ticket.acceptedAt) {
         ticket.acceptedAt = new Date();
+        console.log(`⏰ [updateTicket] Set acceptedAt for ticket ${ticket.ticketCode}`);
       }
 
       // Set closedAt khi status chuyển sang "Closed" hoặc "Done"
       if ((updates.status === "Closed" || updates.status === "Done") && !ticket.closedAt) {
         ticket.closedAt = new Date();
+        console.log(`⏰ [updateTicket] Set closedAt for ticket ${ticket.ticketCode}`);
       }
 
       // 📧 Send email notification when status changes
+      console.log(`📧 [updateTicket] Preparing to send email notification for status change`);
+
       try {
+        console.log(`📧 [updateTicket] Creator info:`, {
+          creatorId: ticket.creator._id,
+          creatorEmail: ticket.creator.email,
+          creatorName: ticket.creator.fullname
+        });
+
         const emailServiceUrl = process.env.EMAIL_SERVICE_URL || 'http://localhost:5030';
         const recipientEmail = ticket.creator.email;
 
