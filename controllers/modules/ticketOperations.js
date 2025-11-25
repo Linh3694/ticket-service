@@ -196,22 +196,44 @@ const createTicketFromEmail = async (req, res) => {
         roles: { $in: ['Email Ticket'] } // Email tickets go to members with Email Ticket role
       }).populate('userId', 'fullname email avatarUrl jobTitle department');
 
+      console.log(`[createTicketFromEmail] 🔍 Found ${supportMembers.length} support members with Email Ticket role`);
+      supportMembers.forEach((member, index) => {
+        console.log(`[createTicketFromEmail] Member ${index + 1}: ${member.email}, userId: ${member.userId ? (member.userId._id || 'no _id') : 'not populated'}`);
+      });
+
       if (supportMembers && supportMembers.length > 0) {
         // Find member with least active tickets (simple load balancing)
         let bestMember = null;
         let minTickets = Infinity;
 
         for (const member of supportMembers) {
-          if (member.userId) {
-            const activeTickets = await Ticket.countDocuments({
-              assignedTo: member.userId._id,
-              status: { $in: ['Assigned', 'Processing', 'Waiting for Customer'] }
-            });
+          if (member.userId && member.userId._id) {
+            try {
+              // Ensure assignedTo is ObjectId, not string
+              const userId = member.userId._id;
+              if (typeof userId === 'string') {
+                // If it's a string, skip this member (should be ObjectId)
+                console.log(`[createTicketFromEmail] ⚠️ Skipping member ${member.email} - userId is string, not ObjectId`);
+                continue;
+              }
 
-            if (activeTickets < minTickets) {
-              minTickets = activeTickets;
-              bestMember = member;
+              const activeTickets = await Ticket.countDocuments({
+                assignedTo: userId,
+                status: { $in: ['Assigned', 'Processing', 'Waiting for Customer'] }
+              });
+
+              console.log(`[createTicketFromEmail] 📊 Member ${member.userId.fullname} has ${activeTickets} active tickets`);
+
+              if (activeTickets < minTickets) {
+                minTickets = activeTickets;
+                bestMember = member;
+              }
+            } catch (countError) {
+              console.log(`[createTicketFromEmail] ⚠️ Error counting tickets for member ${member.email}:`, countError.message);
+              // Continue with other members
             }
+          } else {
+            console.log(`[createTicketFromEmail] ⚠️ Skipping member ${member.email} - no userId populated`);
           }
         }
 
