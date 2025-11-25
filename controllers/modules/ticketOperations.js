@@ -140,19 +140,19 @@ const createTicketFromEmail = async (req, res) => {
 
     const {
       id: emailId,
-      subject,
-      plainContent,
+      title: subject,  // Email service sends 'title', but we use 'subject'
+      description: plainContent,  // Email service sends 'description', but we use 'plainContent'
       creatorId,
-      attachments,
+      files: attachments,  // Email service sends 'files', but we use 'attachments'
       priority = 'Medium'
     } = req.body;
 
     // Validate required fields
     if (!subject || !plainContent) {
-      console.log('[createTicketFromEmail] ❌ Validation failed: missing subject or content');
+      console.log('[createTicketFromEmail] ❌ Validation failed: missing title or description');
       return res.status(400).json({
         success: false,
-        message: 'Subject and content are required'
+        message: 'Title and description are required'
       });
     }
 
