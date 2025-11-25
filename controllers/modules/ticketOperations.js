@@ -1388,6 +1388,7 @@ module.exports = {
   getTicketById,
   updateTicket,
   createTicketFromEmail,
+  getTicketInfoForEmail,
   deleteTicket,
   assignTicketToMe,
   cancelTicketWithReason,
