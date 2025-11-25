@@ -132,6 +132,70 @@ async function populateAssignedToData(tickets) {
   return isArray ? ticketsArray : ticketsArray[0];
 }
 
+// Create ticket from email (internal API for email service)
+const createTicketFromEmail = async (req, res) => {
+  try {
+    console.log('[createTicketFromEmail] Creating ticket from email...');
+
+    const {
+      id: emailId,
+      subject,
+      plainContent,
+      creatorId,
+      attachments,
+      priority = 'Medium'
+    } = req.body;
+
+    // Validate required fields
+    if (!subject || !plainContent) {
+      return res.status(400).json({
+        success: false,
+        message: 'Subject and content are required'
+      });
+    }
+
+    // Create ticket
+    const ticket = new Ticket({
+      ticketCode: await generateTicketCode(),
+      title: subject,
+      description: plainContent,
+      category: 'Email Ticket',
+      status: 'New',
+      priority: priority,
+      creator: creatorId || null,
+      source: 'email',
+      emailId: emailId,
+      attachments: attachments || [],
+      history: [{
+        timestamp: new Date(),
+        action: TICKET_LOGS.CREATED('Email Service'),
+        user: null // System user
+      }]
+    });
+
+    await ticket.save();
+
+    // Populate creator for response
+    await ticket.populate('creator', 'fullname email avatarUrl jobTitle department');
+
+    console.log(`[createTicketFromEmail] ✅ Created ticket ${ticket.ticketCode} from email`);
+
+    res.status(201).json({
+      success: true,
+      ticket: ticket,
+      message: `Ticket ${ticket.ticketCode} created successfully`
+    });
+
+  } catch (error) {
+    console.error('[createTicketFromEmail] Error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to create ticket from email',
+      error: error.message
+    });
+  }
+};
+
 // Frappe API configuration
 const FRAPPE_API_URL = process.env.FRAPPE_API_URL || 'https://admin.sis.wellspring.edu.vn';
 
@@ -1075,6 +1139,7 @@ module.exports = {
   getMyTickets,
   getTicketById,
   updateTicket,
+  createTicketFromEmail,
   deleteTicket,
   assignTicketToMe,
   cancelTicketWithReason,

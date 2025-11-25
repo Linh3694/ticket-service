@@ -9,6 +9,9 @@ const { upload, handleUploadError } = require("../middleware/uploadTicket");
 
 // Static routes
 router.post("/", authenticate, upload.array("attachments", 15), handleUploadError, ticketController.createTicket);
+
+// Internal route for email service (no authentication required)
+router.post("/from-email", ticketController.createTicketFromEmail);
 router.get("/categories", ticketController.getTicketCategories);
 router.get("/debug/team-members", authenticate, ticketController.debugTeamMembers);
 router.get("/technical-stats/:userId", ticketController.getTechnicalStats);
