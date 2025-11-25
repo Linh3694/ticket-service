@@ -910,21 +910,25 @@ const updateTicket = async (req, res) => {
         const emailServiceUrl = process.env.EMAIL_SERVICE_URL || 'http://localhost:5030';
         const recipientEmail = ticket.creator.email;
 
+        console.log(`📧 [updateTicket] Status changed from ${previousStatus} to ${updates.status}`);
+        console.log(`📧 [updateTicket] Email service URL: ${emailServiceUrl}`);
         console.log(`📧 [updateTicket] Sending status change email for ticket ${ticket.ticketCode} to ${recipientEmail}`);
+        console.log(`📧 [updateTicket] Request payload: ticketId=${ticket._id.toString()}, recipientEmail=${recipientEmail}`);
 
         // Call email service asynchronously (don't block the response)
         axios.post(`${emailServiceUrl}/notify-ticket-status`, {
           ticketId: ticket._id.toString(),
           recipientEmail: recipientEmail
         }, {
-          timeout: 5000, // 5 seconds timeout
+          timeout: 10000, // 10 seconds timeout
           headers: {
             'Content-Type': 'application/json'
           }
         }).then(response => {
-          console.log(`✅ [updateTicket] Email notification sent successfully for ticket ${ticket.ticketCode}`);
+          console.log(`✅ [updateTicket] Email notification sent successfully for ticket ${ticket.ticketCode}:`, response.data);
         }).catch(error => {
           console.error(`❌ [updateTicket] Failed to send email notification for ticket ${ticket.ticketCode}:`, error.message);
+          console.error(`❌ [updateTicket] Error details:`, error.response?.data || error.code);
           // Don't throw error here to avoid breaking the ticket update
         });
 
