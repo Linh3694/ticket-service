@@ -18,7 +18,8 @@ const CATEGORY_PREFIXES = {
   'Software': 'SW',
   'Hệ thống phần mềm': 'SW', // Vietnamese name for Software
   'Account': 'ACC',
-  'Tài khoản': 'ACC' // Vietnamese name for Account
+  'Tài khoản': 'ACC', // Vietnamese name for Account
+  'Email Ticket': 'EML' // For tickets created from emails
 };
 
 /**
@@ -38,7 +39,8 @@ const CATEGORY_TO_ROLE = {
   'Software': 'Software',
   'Hệ thống phần mềm': 'Software',
   'Account': 'Account',
-  'Tài khoản': 'Account'
+  'Tài khoản': 'Account',
+  'Email Ticket': 'Overall' // Email tickets go to overall support
 };
 
 /**

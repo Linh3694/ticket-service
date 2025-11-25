@@ -161,7 +161,7 @@ const createTicketFromEmail = async (req, res) => {
     const { TICKET_LOGS } = require('../../utils/logFormatter');
 
     console.log('[createTicketFromEmail] 🔄 Generating ticket code...');
-    const ticketCode = await generateTicketCode();
+    const ticketCode = await generateTicketCode('Email Ticket');
     console.log(`[createTicketFromEmail] ✅ Generated ticket code: ${ticketCode}`);
 
     console.log('[createTicketFromEmail] 🎫 Creating ticket object...');
