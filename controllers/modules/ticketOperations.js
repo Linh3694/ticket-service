@@ -184,16 +184,16 @@ const createTicketFromEmail = async (req, res) => {
 
     console.log('[createTicketFromEmail] 🎫 Creating ticket object...');
 
-    // Auto-assign email tickets to support team
-    console.log('[createTicketFromEmail] 🔄 Auto-assigning email ticket to support team...');
+    // Auto-assign email tickets to support team members with "Email Ticket" role
+    console.log('[createTicketFromEmail] 🔄 Auto-assigning email ticket to support team members with Email Ticket role...');
     let assignedTo = null;
 
     try {
       // Find support team members for 'Email Ticket' category
       const SupportTeamMember = require('../models/SupportTeamMember');
       const supportMembers = await SupportTeamMember.find({
-        active: true,
-        roles: { $in: ['Overall'] } // Email tickets go to Overall support
+        isActive: true,
+        roles: { $in: ['Email Ticket'] } // Email tickets go to members with Email Ticket role
       }).populate('user', 'fullname email avatarUrl jobTitle department');
 
       if (supportMembers && supportMembers.length > 0) {

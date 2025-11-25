@@ -40,7 +40,7 @@ const CATEGORY_TO_ROLE = {
   'Hệ thống phần mềm': 'Software',
   'Account': 'Account',
   'Tài khoản': 'Account',
-  'Email Ticket': 'Overall' // Email tickets go to overall support
+  'Email Ticket': 'Email Ticket' // Email tickets go to members with Email Ticket role
 };
 
 /**
