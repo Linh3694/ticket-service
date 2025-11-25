@@ -638,3 +638,69 @@ exports.webhookUserChanged = async (req, res) => {
     });
   }
 };
+
+// Create user from email (for email service)
+const createUserFromEmail = async (req, res) => {
+  try {
+    console.log('[createUserFromEmail] Creating user from email...');
+    console.log('[createUserFromEmail] Request body:', JSON.stringify(req.body, null, 2));
+
+    const { email, fullname, role = 'user', provider = 'email', active = true, disabled = false } = req.body;
+
+    if (!email) {
+      console.log('[createUserFromEmail] ❌ Missing email');
+      return res.status(400).json({
+        success: false,
+        message: 'Email is required'
+      });
+    }
+
+    // Check if user already exists
+    const existingUser = await User.findOne({ email });
+    if (existingUser) {
+      console.log(`[createUserFromEmail] ✅ User already exists: ${existingUser._id}`);
+      return res.status(200).json({
+        success: true,
+        user: existingUser,
+        message: 'User already exists'
+      });
+    }
+
+    // Create new user
+    const userData = {
+      email,
+      fullname: fullname || email.split('@')[0], // Use part before @ as name
+      role,
+      provider,
+      active,
+      disabled,
+      roles: [], // Empty roles for email users
+      frappeUserId: null,
+      employeeCode: null,
+      jobTitle: 'User',
+      department: '',
+      avatarUrl: '',
+      microsoftId: null
+    };
+
+    const newUser = new User(userData);
+    await newUser.save();
+
+    console.log(`[createUserFromEmail] ✅ Created new user: ${newUser._id} (${email})`);
+
+    res.status(201).json({
+      success: true,
+      user: newUser,
+      message: 'User created successfully'
+    });
+
+  } catch (error) {
+    console.error('[createUserFromEmail] ❌ Error:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+};
+
+module.exports.createUserFromEmail = createUserFromEmail;

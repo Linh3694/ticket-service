@@ -19,4 +19,7 @@ router.post('/sync/email/:email', authenticate, userController.syncUserByEmail);
 // 🔔 ENDPOINT 4: Webhook - User changed in Frappe (NO AUTH)
 router.post('/webhook/frappe-user-changed', userController.webhookUserChanged);
 
+// 👤 ENDPOINT 5: Create user from email (NO AUTH - for email service)
+router.post('/', userController.createUserFromEmail);
+
 module.exports = router;
