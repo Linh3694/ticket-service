@@ -60,16 +60,17 @@ const sendMessage = async (req, res) => {
     let newStatus = ticket.status;
 
     // Auto-change status based on sender
-    if (isCreator && ticket.status === 'Waiting for Customer') {
-      // Customer replied, change to Processing
-      ticket.status = 'Processing';
-      statusChanged = true;
-      newStatus = 'Processing';
-    } else if (isAssignedTo && ticket.status === 'Processing') {
+    // Priority: Support action takes precedence when user is both creator and assignedTo
+    if (isAssignedTo && ticket.status === 'Processing') {
       // Support replied, change to Waiting for Customer
       ticket.status = 'Waiting for Customer';
       statusChanged = true;
       newStatus = 'Waiting for Customer';
+    } else if (isCreator && ticket.status === 'Waiting for Customer' && !isAssignedTo) {
+      // Customer replied, change to Processing (only if not also assignedTo)
+      ticket.status = 'Processing';
+      statusChanged = true;
+      newStatus = 'Processing';
     }
 
     // Process file uploads (multer stores files in uploads/Tickets)
