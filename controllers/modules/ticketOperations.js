@@ -180,7 +180,7 @@ const createTicketFromEmail = async (req, res) => {
       attachments: attachments || [],
       history: [{
         timestamp: new Date(),
-        action: TICKET_LOGS.CREATED('Email Service'),
+        action: TICKET_LOGS.TICKET_CREATED('Email Service'),
         user: null // System user
       }]
     });
