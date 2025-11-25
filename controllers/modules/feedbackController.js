@@ -157,10 +157,34 @@ const getTeamMemberFeedbackStats = async (req, res) => {
 
     // Get ALL tickets assigned to this SupportTeamMember
     // member._id is SupportTeamMember ObjectId, but assignedTo refers to User._id
-    // So we need to use member.userId (which is the User ObjectId)
-    const allTickets = await Ticket.find({
-      assignedTo: member.userId
-    }).lean();
+    // member.userId can be ObjectId or string email (legacy data)
+    let assignedToQuery;
+    if (member.userId && typeof member.userId === 'object' && member.userId.toString().match(/^[0-9a-fA-F]{24}$/)) {
+      // It's a valid ObjectId
+      assignedToQuery = member.userId;
+    } else if (member.userId && typeof member.userId === 'string') {
+      // It's a string, try to find User by email first
+      const User = require("../../models/Users");
+      const userByEmail = await User.findOne({ email: member.userId }).select('_id').lean();
+      if (userByEmail) {
+        assignedToQuery = userByEmail._id;
+      } else {
+        // If userId is string but not found as email, assume it's an ObjectId string
+        try {
+          assignedToQuery = require('mongoose').Types.ObjectId(member.userId);
+        } catch (e) {
+          console.log(`[getTeamMemberFeedbackStats] Invalid userId format: ${member.userId}`);
+          assignedToQuery = null;
+        }
+      }
+    } else {
+      console.log(`[getTeamMemberFeedbackStats] No valid userId for member: ${member.email}`);
+      assignedToQuery = null;
+    }
+
+    const allTickets = assignedToQuery ? await Ticket.find({
+      assignedTo: assignedToQuery
+    }).lean() : [];
 
     const totalTickets = allTickets.length;
     const closedTickets = allTickets.filter(t => t.status === 'Closed').length;

@@ -202,27 +202,42 @@ const createTicketFromEmail = async (req, res) => {
       });
 
       if (supportMembers && supportMembers.length > 0) {
-        // Find member with least active tickets (simple load balancing)
+          // Find member with least active tickets (simple load balancing)
         let bestMember = null;
         let minTickets = Infinity;
 
         for (const member of supportMembers) {
-          if (member.userId && member.userId._id) {
+          if (member.userId) {
             try {
-              // Ensure assignedTo is ObjectId, not string
-              const userId = member.userId._id;
-              if (typeof userId === 'string') {
-                // If it's a string, skip this member (should be ObjectId)
-                console.log(`[createTicketFromEmail] ⚠️ Skipping member ${member.email} - userId is string, not ObjectId`);
+              let userIdForQuery;
+
+              if (member.userId._id && typeof member.userId._id !== 'string') {
+                // Populated ObjectId
+                userIdForQuery = member.userId._id;
+              } else if (typeof member.userId === 'string' && member.userId.match(/^[0-9a-fA-F]{24}$/)) {
+                // ObjectId string
+                userIdForQuery = require('mongoose').Types.ObjectId(member.userId);
+              } else if (typeof member.userId === 'string') {
+                // Email string - find User by email
+                const User = require("../../models/Users");
+                const userByEmail = await User.findOne({ email: member.userId }).select('_id').lean();
+                if (userByEmail) {
+                  userIdForQuery = userByEmail._id;
+                } else {
+                  console.log(`[createTicketFromEmail] ⚠️ Cannot resolve userId for member ${member.email}`);
+                  continue;
+                }
+              } else {
+                console.log(`[createTicketFromEmail] ⚠️ Invalid userId format for member ${member.email}`);
                 continue;
               }
 
               const activeTickets = await Ticket.countDocuments({
-                assignedTo: userId,
+                assignedTo: userIdForQuery,
                 status: { $in: ['Assigned', 'Processing', 'Waiting for Customer'] }
               });
 
-              console.log(`[createTicketFromEmail] 📊 Member ${member.userId.fullname} has ${activeTickets} active tickets`);
+              console.log(`[createTicketFromEmail] 📊 Member ${member.userId.fullname || member.email} has ${activeTickets} active tickets`);
 
               if (activeTickets < minTickets) {
                 minTickets = activeTickets;
@@ -233,14 +248,31 @@ const createTicketFromEmail = async (req, res) => {
               // Continue with other members
             }
           } else {
-            console.log(`[createTicketFromEmail] ⚠️ Skipping member ${member.email} - no userId populated`);
+            console.log(`[createTicketFromEmail] ⚠️ Skipping member ${member.email} - no userId`);
           }
         }
 
         if (bestMember && bestMember.userId) {
-          assignedTo = bestMember.userId._id;
-          console.log(`[createTicketFromEmail] ✅ Auto-assigned to: ${bestMember.userId.fullname} (${bestMember.userId.email})`);
-          console.log(`[createTicketFromEmail] 📊 Member has ${minTickets} active tickets`);
+          // Use the same logic as above to get the correct userId
+          if (bestMember.userId._id && typeof bestMember.userId._id !== 'string') {
+            assignedTo = bestMember.userId._id;
+          } else if (typeof bestMember.userId === 'string' && bestMember.userId.match(/^[0-9a-fA-F]{24}$/)) {
+            assignedTo = require('mongoose').Types.ObjectId(bestMember.userId);
+          } else if (typeof bestMember.userId === 'string') {
+            // Email string - find User by email
+            const User = require("../../models/Users");
+            const userByEmail = await User.findOne({ email: bestMember.userId }).select('_id').lean();
+            if (userByEmail) {
+              assignedTo = userByEmail._id;
+            }
+          }
+
+          if (assignedTo) {
+            console.log(`[createTicketFromEmail] ✅ Auto-assigned to: ${bestMember.userId.fullname || bestMember.email} (${bestMember.userId.email || bestMember.email})`);
+            console.log(`[createTicketFromEmail] 📊 Member has ${minTickets} active tickets`);
+          } else {
+            console.log('[createTicketFromEmail] ⚠️ Could not resolve assignedTo for best member');
+          }
         } else {
           console.log('[createTicketFromEmail] ⚠️ No suitable support member found for auto-assignment');
         }
