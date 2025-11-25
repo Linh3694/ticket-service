@@ -5,6 +5,7 @@ const ticketOperations = require('./ticketOperations');
 const {
   getTechnicalUsers,
   createTicket,
+  createTicketFromEmail,
   getTickets,
   getAllTickets,
   getMyTickets,
@@ -59,6 +60,7 @@ module.exports = {
   // Ticket operations
   getTechnicalUsers,
   createTicket,
+  createTicketFromEmail,
   getTickets,
   getAllTickets,
   getMyTickets,
