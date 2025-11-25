@@ -664,6 +664,34 @@ const updateTicket = async (req, res) => {
       if ((updates.status === "Closed" || updates.status === "Done") && !ticket.closedAt) {
         ticket.closedAt = new Date();
       }
+
+      // 📧 Send email notification when status changes
+      try {
+        const emailServiceUrl = process.env.EMAIL_SERVICE_URL || 'https://admin.sis.wellspring.edu.vn/api/email';
+        const recipientEmail = ticket.creator.email;
+
+        console.log(`📧 [updateTicket] Sending status change email for ticket ${ticket.ticketCode} to ${recipientEmail}`);
+
+        // Call email service asynchronously (don't block the response)
+        axios.post(`${emailServiceUrl}/notify-ticket-status`, {
+          ticketId: ticket._id.toString(),
+          recipientEmail: recipientEmail
+        }, {
+          timeout: 5000, // 5 seconds timeout
+          headers: {
+            'Content-Type': 'application/json'
+          }
+        }).then(response => {
+          console.log(`✅ [updateTicket] Email notification sent successfully for ticket ${ticket.ticketCode}`);
+        }).catch(error => {
+          console.error(`❌ [updateTicket] Failed to send email notification for ticket ${ticket.ticketCode}:`, error.message);
+          // Don't throw error here to avoid breaking the ticket update
+        });
+
+      } catch (error) {
+        console.error(`❌ [updateTicket] Error initiating email notification for ticket ${ticket.ticketCode}:`, error.message);
+        // Continue with ticket update even if email notification fails
+      }
     }
 
     // 📝 Log other field changes
