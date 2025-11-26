@@ -1,7 +1,7 @@
 const Ticket = require("../../models/Ticket");
 const { TICKET_LOGS } = require('../../utils/logFormatter');
 const { logMessageSent, logTicketStatusChanged } = require('../../utils/logger');
-const { Types } = require('mongoose');
+const { Types, connection } = require('mongoose');
 
 /**
  * Send message to ticket
@@ -154,30 +154,43 @@ const sendMessage = async (req, res) => {
 
           // For "Waiting for Customer" status, include message content if available
           if (newStatus === 'Waiting for Customer') {
-            let messageContent = null;
-            let messageSender = null;
+            // Check if email has already been sent for this status (only send once per ticket)
+            if (ticket.waitingForCustomerEmailSent) {
+              console.log(`📧 [sendMessage] Email already sent for "Waiting for Customer" status on ticket ${ticket.ticketCode}, skipping...`);
+            } else {
+              let messageContent = null;
+              let messageSender = null;
 
-            if (message && message.trim()) {
-              messageContent = message.trim();
-              messageSender = req.user.fullname || req.user.email || 'Kỹ thuật viên';
-              console.log(`📧 [sendMessage] Including message content in email: "${messageContent.substring(0, 50)}${messageContent.length > 50 ? '...' : ''}"`);
+              if (message && message.trim()) {
+                messageContent = message.trim();
+                messageSender = req.user.fullname || req.user.email || 'Kỹ thuật viên';
+                console.log(`📧 [sendMessage] Including message content in email: "${messageContent.substring(0, 50)}${messageContent.length > 50 ? '...' : ''}"`);
+              }
+
+              // Call email service with message content
+              const axios = require('axios');
+              axios.post(`${emailServiceUrl}/notify-ticket-status`, {
+                ticketId: ticket._id.toString(),
+                recipientEmail: ticket.creator.email,
+                messageContent: messageContent,
+                messageSender: messageSender
+              }, {
+                timeout: 10000,
+                headers: { 'Content-Type': 'application/json' }
+              }).then(async (response) => {
+                console.log(`✅ [sendMessage] Status change email with message sent to customer:`, response.data);
+
+                // Mark email as sent for this status
+                try {
+                  await Ticket.findByIdAndUpdate(ticket._id, { waitingForCustomerEmailSent: true });
+                  console.log(`✅ [sendMessage] Marked waitingForCustomerEmailSent=true for ticket ${ticket.ticketCode}`);
+                } catch (updateError) {
+                  console.error(`❌ [sendMessage] Failed to update waitingForCustomerEmailSent flag:`, updateError.message);
+                }
+              }).catch(error => {
+                console.error(`❌ [sendMessage] Failed to send status change email:`, error.message);
+              });
             }
-
-            // Call email service with message content
-            const axios = require('axios');
-            axios.post(`${emailServiceUrl}/notify-ticket-status`, {
-              ticketId: ticket._id.toString(),
-              recipientEmail: ticket.creator.email,
-              messageContent: messageContent,
-              messageSender: messageSender
-            }, {
-              timeout: 10000,
-              headers: { 'Content-Type': 'application/json' }
-            }).then(response => {
-              console.log(`✅ [sendMessage] Status change email with message sent to customer:`, response.data);
-            }).catch(error => {
-              console.error(`❌ [sendMessage] Failed to send status change email:`, error.message);
-            });
           } else {
             // For other status changes, use the helper function
             const { sendStatusChangeEmail } = require('./ticketOperations');

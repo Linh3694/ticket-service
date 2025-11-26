@@ -51,6 +51,7 @@ const ticketSchema = new mongoose.Schema(
 
       // Email thread tracking
       emailMessageId: { type: String }, // Message-ID của email tạo ticket gốc
+      waitingForCustomerEmailSent: { type: Boolean, default: false }, // Track đã gửi mail cho trạng thái "Waiting for Customer"
 
       sla: {
         type: Date, // Hạn chót (deadline) dựa trên priority
