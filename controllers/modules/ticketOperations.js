@@ -596,6 +596,29 @@ const createTicket = async (req, res) => {
       // Don't fail the request if notification fails
     }
 
+    // 6️⃣ Send ticket creation confirmation email to creator
+    try {
+      const emailServiceUrl = process.env.EMAIL_SERVICE_URL || 'http://localhost:5030';
+      const creatorEmail = req.user.email;
+
+      console.log(`📧 [createTicket] Sending ticket creation confirmation email to ${creatorEmail}`);
+
+      // Call email service to send ticket creation notification
+      const axios = require('axios');
+      await axios.post(`${emailServiceUrl}/notify-ticket-creation`, {
+        ticketId: newTicket._id.toString(),
+        recipientEmail: creatorEmail
+      }, {
+        timeout: 10000,
+        headers: { 'Content-Type': 'application/json' }
+      });
+
+      console.log(`✅ [createTicket] Ticket creation confirmation email sent to ${creatorEmail}`);
+    } catch (emailError) {
+      console.error(`❌ [createTicket] Failed to send ticket creation email:`, emailError.message);
+      // Don't fail the request if email fails
+    }
+
     // Populate for response
     await newTicket.populate('creator', 'fullname email avatarUrl jobTitle department');
     await newTicket.populate('assignedTo', 'fullname email avatarUrl jobTitle department _id');
