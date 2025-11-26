@@ -25,4 +25,7 @@ router.post('/', userController.createUserFromEmail);
 // 👤 ENDPOINT 6: Get user by email (NO AUTH - for email service)
 router.get('/email/:email', userController.getUserByEmail);
 
+// 👤 ENDPOINT 7: Get user by email for internal use (NO AUTH)
+router.get('/by-email/:email', userController.getUserByEmail);
+
 module.exports = router;
