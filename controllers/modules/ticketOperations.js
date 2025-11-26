@@ -463,6 +463,47 @@ async function getTechnicalUsers(token = null) {
 /**
  * Create new ticket
  */
+// Helper function to send email when status changes to "Waiting for Customer"
+const sendStatusChangeEmail = async (ticket, previousStatus, newStatus, user) => {
+  try {
+    console.log(`📧 [sendStatusChangeEmail] Status changed from ${previousStatus} to ${newStatus} for ticket ${ticket.ticketCode}`);
+
+    // Only send email for "Waiting for Customer" status changes
+    if (newStatus !== 'Waiting for Customer') {
+      console.log(`📧 [sendStatusChangeEmail] Skipping email for status ${newStatus} (only send for Waiting for Customer)`);
+      return;
+    }
+
+    console.log(`📧 [sendStatusChangeEmail] Creator info:`, {
+      creatorId: ticket.creator._id,
+      creatorEmail: ticket.creator.email,
+      creatorName: ticket.creator.fullname
+    });
+
+    const emailServiceUrl = process.env.EMAIL_SERVICE_URL || 'http://localhost:5030';
+    const recipientEmail = ticket.creator.email;
+
+    console.log(`📧 [sendStatusChangeEmail] Email service URL: ${emailServiceUrl}`);
+    console.log(`📧 [sendStatusChangeEmail] Sending status change email for ticket ${ticket.ticketCode} to ${recipientEmail}`);
+
+    // Call email service asynchronously
+    const axios = require('axios');
+    await axios.post(`${emailServiceUrl}/notify-ticket-status`, {
+      ticketId: ticket._id.toString(),
+      recipientEmail: recipientEmail
+    }, {
+      timeout: 10000,
+      headers: { 'Content-Type': 'application/json' }
+    });
+
+    console.log(`✅ [sendStatusChangeEmail] Email notification sent successfully for ticket ${ticket.ticketCode}`);
+  } catch (error) {
+    console.error(`❌ [sendStatusChangeEmail] Failed to send email notification:`, error.message);
+    console.error(`❌ [sendStatusChangeEmail] Error details:`, error.response?.data || error.code);
+    throw error; // Re-throw to let caller handle
+  }
+};
+
 const createTicket = async (req, res) => {
   try {
     console.log('🎫 [createTicket] Starting ticket creation...');
@@ -999,39 +1040,9 @@ const updateTicket = async (req, res) => {
       console.log(`📧 [updateTicket] Preparing to send email notification for status change`);
 
       try {
-        console.log(`📧 [updateTicket] Creator info:`, {
-          creatorId: ticket.creator._id,
-          creatorEmail: ticket.creator.email,
-          creatorName: ticket.creator.fullname
-        });
-
-        const emailServiceUrl = process.env.EMAIL_SERVICE_URL || 'http://localhost:5030';
-        const recipientEmail = ticket.creator.email;
-
-        console.log(`📧 [updateTicket] Status changed from ${previousStatus} to ${updates.status}`);
-        console.log(`📧 [updateTicket] Email service URL: ${emailServiceUrl}`);
-        console.log(`📧 [updateTicket] Sending status change email for ticket ${ticket.ticketCode} to ${recipientEmail}`);
-        console.log(`📧 [updateTicket] Request payload: ticketId=${ticket._id.toString()}, recipientEmail=${recipientEmail}`);
-
-        // Call email service asynchronously (don't block the response)
-        axios.post(`${emailServiceUrl}/notify-ticket-status`, {
-          ticketId: ticket._id.toString(),
-          recipientEmail: recipientEmail
-        }, {
-          timeout: 10000, // 10 seconds timeout
-          headers: {
-            'Content-Type': 'application/json'
-          }
-        }).then(response => {
-          console.log(`✅ [updateTicket] Email notification sent successfully for ticket ${ticket.ticketCode}:`, response.data);
-        }).catch(error => {
-          console.error(`❌ [updateTicket] Failed to send email notification for ticket ${ticket.ticketCode}:`, error.message);
-          console.error(`❌ [updateTicket] Error details:`, error.response?.data || error.code);
-          // Don't throw error here to avoid breaking the ticket update
-        });
-
+        await sendStatusChangeEmail(ticket, previousStatus, updates.status, req.user);
       } catch (error) {
-        console.error(`❌ [updateTicket] Error initiating email notification for ticket ${ticket.ticketCode}:`, error.message);
+        console.error(`❌ [updateTicket] Error sending email notification for ticket ${ticket.ticketCode}:`, error.message);
         // Continue with ticket update even if email notification fails
       }
     }
@@ -1469,5 +1480,6 @@ module.exports = {
   deleteTicket,
   assignTicketToMe,
   cancelTicketWithReason,
-  reopenTicket
+  reopenTicket,
+  sendStatusChangeEmail
 };

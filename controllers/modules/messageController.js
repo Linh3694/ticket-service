@@ -152,31 +152,39 @@ const sendMessage = async (req, res) => {
           const emailServiceUrl = process.env.EMAIL_SERVICE_URL || 'http://localhost:5030';
           console.log(`📧 [sendMessage] Support team changed status, sending email to ${ticket.creator.email}`);
 
-          // Prepare message content if status changed to "Waiting for Customer"
-          let messageContent = null;
-          let messageSender = null;
+          // For "Waiting for Customer" status, include message content if available
+          if (newStatus === 'Waiting for Customer') {
+            let messageContent = null;
+            let messageSender = null;
 
-          if (newStatus === 'Waiting for Customer' && message && message.trim()) {
-            messageContent = message.trim();
-            messageSender = req.user.fullname || req.user.email || 'Kỹ thuật viên';
-            console.log(`📧 [sendMessage] Including message content in email: "${messageContent.substring(0, 50)}${messageContent.length > 50 ? '...' : ''}"`);
+            if (message && message.trim()) {
+              messageContent = message.trim();
+              messageSender = req.user.fullname || req.user.email || 'Kỹ thuật viên';
+              console.log(`📧 [sendMessage] Including message content in email: "${messageContent.substring(0, 50)}${messageContent.length > 50 ? '...' : ''}"`);
+            }
+
+            // Call email service with message content
+            const axios = require('axios');
+            axios.post(`${emailServiceUrl}/notify-ticket-status`, {
+              ticketId: ticket._id.toString(),
+              recipientEmail: ticket.creator.email,
+              messageContent: messageContent,
+              messageSender: messageSender
+            }, {
+              timeout: 10000,
+              headers: { 'Content-Type': 'application/json' }
+            }).then(response => {
+              console.log(`✅ [sendMessage] Status change email with message sent to customer:`, response.data);
+            }).catch(error => {
+              console.error(`❌ [sendMessage] Failed to send status change email:`, error.message);
+            });
+          } else {
+            // For other status changes, use the helper function
+            const { sendStatusChangeEmail } = require('./ticketOperations');
+            sendStatusChangeEmail(ticket, oldStatus, newStatus, req.user).catch(error => {
+              console.error(`❌ [sendMessage] Failed to send status change email via helper:`, error.message);
+            });
           }
-
-          // Call email service asynchronously
-          const axios = require('axios');
-          axios.post(`${emailServiceUrl}/notify-ticket-status`, {
-            ticketId: ticket._id.toString(),
-            recipientEmail: ticket.creator.email,
-            messageContent: messageContent,
-            messageSender: messageSender
-          }, {
-            timeout: 10000,
-            headers: { 'Content-Type': 'application/json' }
-          }).then(response => {
-            console.log(`✅ [sendMessage] Status change email sent to customer:`, response.data);
-          }).catch(error => {
-            console.error(`❌ [sendMessage] Failed to send status change email:`, error.message);
-          });
         } catch (emailErr) {
           console.warn('⚠️ [sendMessage] Failed to initiate status change email:', emailErr.message);
         }
