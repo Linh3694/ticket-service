@@ -1478,6 +1478,45 @@ const reopenTicket = async (req, res) => {
   }
 };
 
+// Debug function to check ticket email status
+const debugTicketEmailStatus = async (req, res) => {
+  try {
+    const { ticketId } = req.params;
+
+    const ticket = await Ticket.findById(ticketId)
+      .populate('creator', 'fullname email avatarUrl jobTitle department')
+      .populate('assignedTo', '_id fullname email avatarUrl jobTitle department')
+      .lean();
+
+    if (!ticket) {
+      return res.status(404).json({ success: false, message: 'Ticket not found' });
+    }
+
+    const debugInfo = {
+      ticketCode: ticket.ticketCode,
+      status: ticket.status,
+      creator: {
+        _id: ticket.creator?._id,
+        email: ticket.creator?.email,
+        fullname: ticket.creator?.fullname
+      },
+      assignedTo: ticket.assignedTo ? {
+        _id: ticket.assignedTo._id,
+        email: ticket.assignedTo.email,
+        fullname: ticket.assignedTo.fullname
+      } : null,
+      waitingForCustomerEmailSent: ticket.waitingForCustomerEmailSent,
+      hasCreatorEmail: !!ticket.creator?.email,
+      messageCount: ticket.messages?.length || 0
+    };
+
+    res.json({ success: true, debugInfo });
+  } catch (error) {
+    console.error('Debug ticket error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
 module.exports = {
   getTechnicalUsers,
   createTicket,
@@ -1492,5 +1531,6 @@ module.exports = {
   assignTicketToMe,
   cancelTicketWithReason,
   reopenTicket,
-  sendStatusChangeEmail
+  sendStatusChangeEmail,
+  debugTicketEmailStatus
 };

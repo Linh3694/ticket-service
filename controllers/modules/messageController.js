@@ -40,6 +40,9 @@ const sendMessage = async (req, res) => {
       ['SIS IT', 'IT Helpdesk', 'System Manager', 'technical', 'superadmin'].includes(role)
     );
 
+    console.log(`🔍 [sendMessage] Permission check: isCreator=${isCreator}, isAssignedTo=${isAssignedTo}, isSupportTeam=${isSupportTeam}`);
+    console.log(`🔍 [sendMessage] User: ${req.user.email} (${userId}), Ticket assignedTo: ${ticket.assignedTo}`);
+
     if (!isCreator && !isAssignedTo && !isSupportTeam) {
       return res.status(403).json({
         success: false,
@@ -147,6 +150,7 @@ const sendMessage = async (req, res) => {
       }
 
       // Send email notification to customer when support team changes status
+      console.log(`📧 [sendMessage] Debug: isAssignedTo=${isAssignedTo}, creatorEmail=${ticket.creator?.email}, ticketCode=${ticket.ticketCode}, statusChanged=${statusChanged}, newStatus=${newStatus}`);
       if (isAssignedTo && ticket.creator?.email) {
         try {
           const emailServiceUrl = process.env.EMAIL_SERVICE_URL || 'http://localhost:5030';
