@@ -25,7 +25,9 @@ const sendMessage = async (req, res) => {
       });
     }
 
-    const ticket = await Ticket.findById(ticketId);
+    const ticket = await Ticket.findById(ticketId)
+      .populate('creator', 'fullname email avatarUrl jobTitle department')
+      .populate('assignedTo', 'fullname email avatarUrl jobTitle department');
 
     if (!ticket) {
       console.log(`❌ [sendMessage] Ticket not found: ${ticketId}`);
@@ -36,6 +38,8 @@ const sendMessage = async (req, res) => {
     }
 
     console.log(`📋 [sendMessage] Found ticket: ${ticket.ticketCode}, status: ${ticket.status}, waitingForCustomerEmailSent: ${ticket.waitingForCustomerEmailSent}`);
+    console.log(`👤 [sendMessage] Creator: ${ticket.creator?.fullname} (${ticket.creator?.email})`);
+    console.log(`👨‍💼 [sendMessage] AssignedTo: ${ticket.assignedTo?.fullname} (${ticket.assignedTo?.email})`);
 
     // Check permission: creator, assignedTo, or support team
     const isCreator = ticket.creator.equals(userId);
