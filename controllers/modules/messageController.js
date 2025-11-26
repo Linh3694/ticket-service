@@ -77,6 +77,12 @@ const sendMessage = async (req, res) => {
       ticket.status = 'Processing';
       statusChanged = true;
       newStatus = 'Processing';
+    } else if (isCreator && (ticket.status === 'Done' || ticket.status === 'Closed') && !isAssignedTo) {
+      // Customer reopened ticket from Done/Closed status
+      ticket.status = 'Processing';
+      ticket.closedAt = null; // Reset closed timestamp
+      statusChanged = true;
+      newStatus = 'Processing';
     }
 
     // Process file uploads (multer stores files in uploads/Tickets)
@@ -159,11 +165,11 @@ const sendMessage = async (req, res) => {
           const emailServiceUrl = process.env.EMAIL_SERVICE_URL || 'http://localhost:5030';
           console.log(`📧 [sendMessage] ENTERING EMAIL LOGIC - emailServiceUrl=${emailServiceUrl}, recipient=${ticket.creator.email}`);
 
-          // For "Waiting for Customer" status, include message content if available
-          if (newStatus === 'Waiting for Customer') {
-            // Check if email has already been sent for this status (only send once per ticket)
+          // For "Waiting for Customer" status from "Processing", include message content if available (only once per ticket)
+          if (newStatus === 'Waiting for Customer' && oldStatus === 'Processing') {
+            // Check if email has already been sent for Processing -> Waiting for Customer transition
             if (ticket.waitingForCustomerEmailSent) {
-              console.log(`📧 [sendMessage] Email already sent for "Waiting for Customer" status on ticket ${ticket.ticketCode}, skipping...`);
+              console.log(`📧 [sendMessage] Email already sent for Processing->Waiting for Customer transition on ticket ${ticket.ticketCode}, skipping...`);
             } else {
               let messageContent = null;
               let messageSender = null;
@@ -198,6 +204,20 @@ const sendMessage = async (req, res) => {
                 console.error(`❌ [sendMessage] Failed to send status change email:`, error.message);
               });
             }
+          } else if (newStatus === 'Waiting for Customer') {
+            // For Waiting for Customer from other statuses (not Processing), send email without message content
+            console.log(`📧 [sendMessage] Sending email for ${oldStatus}->Waiting for Customer transition (without message content)`);
+            const { sendStatusChangeEmail } = require('./ticketOperations');
+            sendStatusChangeEmail(ticket, oldStatus, newStatus, req.user).catch(error => {
+              console.error(`❌ [sendMessage] Failed to send status change email via helper:`, error.message);
+            });
+          } else if (oldStatus === 'Done' || oldStatus === 'Closed') {
+            // Customer reopened ticket - always send email
+            console.log(`📧 [sendMessage] Customer reopened ticket from ${oldStatus} to ${newStatus}, sending email`);
+            const { sendStatusChangeEmail } = require('./ticketOperations');
+            sendStatusChangeEmail(ticket, oldStatus, newStatus, req.user).catch(error => {
+              console.error(`❌ [sendMessage] Failed to send status change email via helper:`, error.message);
+            });
           } else {
             // For other status changes, use the helper function
             const { sendStatusChangeEmail } = require('./ticketOperations');

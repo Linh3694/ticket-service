@@ -463,20 +463,34 @@ async function getTechnicalUsers(token = null) {
 /**
  * Create new ticket
  */
-// Helper function to send email when status changes to "Waiting for Customer"
+// Helper function to send email when status changes
 const sendStatusChangeEmail = async (ticket, previousStatus, newStatus, user) => {
   try {
     console.log(`📧 [sendStatusChangeEmail] Status changed from ${previousStatus} to ${newStatus} for ticket ${ticket.ticketCode}`);
 
-    // Only send email for "Waiting for Customer" status changes
-    if (newStatus !== 'Waiting for Customer') {
-      console.log(`📧 [sendStatusChangeEmail] Skipping email for status ${newStatus} (only send for Waiting for Customer)`);
-      return;
+    // Handle "Waiting for Customer" status changes with special logic
+    if (newStatus === 'Waiting for Customer') {
+      // Special case: Only send email once when transitioning from "Processing" to "Waiting for Customer"
+      if (previousStatus === 'Processing') {
+        if (ticket.waitingForCustomerEmailSent) {
+          console.log(`📧 [sendStatusChangeEmail] Email already sent for Processing->Waiting for Customer on ticket ${ticket.ticketCode}, skipping...`);
+          return;
+        }
+        console.log(`📧 [sendStatusChangeEmail] Sending first-time email for Processing->Waiting for Customer transition`);
+      } else {
+        // For other transitions to "Waiting for Customer", always send email
+        console.log(`📧 [sendStatusChangeEmail] Sending email for ${previousStatus}->Waiting for Customer transition (not from Processing)`);
+      }
+    }
+    // For other status changes (Done, Closed, Cancelled, etc.), always send email
+    else {
+      console.log(`📧 [sendStatusChangeEmail] Sending email for status change to ${newStatus} (updated logic)`);
     }
 
-    // Check if email has already been sent for this status (only send once per ticket)
-    if (ticket.waitingForCustomerEmailSent) {
-      console.log(`📧 [sendStatusChangeEmail] Email already sent for "Waiting for Customer" status on ticket ${ticket.ticketCode}, skipping...`);
+    // Check if creator has email
+    console.log(`📧 [sendStatusChangeEmail] Checking creator email: ${ticket.creator?.email}`);
+    if (!ticket.creator?.email) {
+      console.log(`📧 [sendStatusChangeEmail] No creator email found, skipping...`);
       return;
     }
 
@@ -502,12 +516,14 @@ const sendStatusChangeEmail = async (ticket, previousStatus, newStatus, user) =>
       headers: { 'Content-Type': 'application/json' }
     });
 
-    // Mark email as sent for this status
-    ticket.waitingForCustomerEmailSent = true;
-    await ticket.save();
+    // Mark email as sent only for Processing -> Waiting for Customer transition
+    if (previousStatus === 'Processing' && newStatus === 'Waiting for Customer') {
+      ticket.waitingForCustomerEmailSent = true;
+      await ticket.save();
+      console.log(`✅ [sendStatusChangeEmail] Marked waitingForCustomerEmailSent=true for ticket ${ticket.ticketCode}`);
+    }
 
     console.log(`✅ [sendStatusChangeEmail] Email notification sent successfully for ticket ${ticket.ticketCode}`);
-    console.log(`✅ [sendStatusChangeEmail] Marked waitingForCustomerEmailSent=true for ticket ${ticket.ticketCode}`);
   } catch (error) {
     console.error(`❌ [sendStatusChangeEmail] Failed to send email notification:`, error.message);
     console.error(`❌ [sendStatusChangeEmail] Error details:`, error.response?.data || error.code);
