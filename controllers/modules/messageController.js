@@ -8,7 +8,6 @@ const { Types, connection } = require('mongoose');
  */
 const sendMessage = async (req, res) => {
   try {
-    console.log(`🚀 [sendMessage] START - ticketId: ${req.params.ticketId}, user: ${req.user.email}`);
     const { ticketId } = req.params;
     const { text } = req.body;
     const userId = req.user._id;
@@ -37,9 +36,7 @@ const sendMessage = async (req, res) => {
       });
     }
 
-    console.log(`📋 [sendMessage] Found ticket: ${ticket.ticketCode}, status: ${ticket.status}, waitingForCustomerEmailSent: ${ticket.waitingForCustomerEmailSent}`);
-    console.log(`👤 [sendMessage] Creator: ${ticket.creator?.fullname} (${ticket.creator?.email})`);
-    console.log(`👨‍💼 [sendMessage] AssignedTo: ${ticket.assignedTo?.fullname} (${ticket.assignedTo?.email})`);
+    console.log(`📋 [sendMessage] Ticket: ${ticket.ticketCode}, status: ${ticket.status}, waitingForCustomerEmailSent: ${ticket.waitingForCustomerEmailSent}, creator: ${ticket.creator?.email}`);
 
     // Check permission: creator, assignedTo, or support team
     const isCreator = ticket.creator.equals(userId);
@@ -48,8 +45,6 @@ const sendMessage = async (req, res) => {
       ['SIS IT', 'IT Helpdesk', 'System Manager', 'technical', 'superadmin'].includes(role)
     );
 
-    console.log(`🔍 [sendMessage] Permission check: isCreator=${isCreator}, isAssignedTo=${isAssignedTo}, isSupportTeam=${isSupportTeam}`);
-    console.log(`🔍 [sendMessage] User: ${req.user.email} (${userId}), Ticket assignedTo: ${ticket.assignedTo}`);
 
     if (!isCreator && !isAssignedTo && !isSupportTeam) {
       return res.status(403).json({
@@ -72,21 +67,16 @@ const sendMessage = async (req, res) => {
 
     // Auto-change status based on sender
     // Priority: Support action takes precedence when user is both creator and assignedTo
-    console.log(`🔄 [sendMessage] Status change logic: isAssignedTo=${isAssignedTo}, isCreator=${isCreator}, currentStatus=${ticket.status}`);
     if (isAssignedTo && ticket.status === 'Processing') {
       // Support replied, change to Waiting for Customer
-      console.log(`🔄 [sendMessage] Support replied - changing status from Processing to Waiting for Customer`);
       ticket.status = 'Waiting for Customer';
       statusChanged = true;
       newStatus = 'Waiting for Customer';
     } else if (isCreator && ticket.status === 'Waiting for Customer' && !isAssignedTo) {
       // Customer replied, change to Processing (only if not also assignedTo)
-      console.log(`🔄 [sendMessage] Customer replied - changing status from Waiting for Customer to Processing`);
       ticket.status = 'Processing';
       statusChanged = true;
       newStatus = 'Processing';
-    } else {
-      console.log(`🔄 [sendMessage] No status change needed`);
     }
 
     // Process file uploads (multer stores files in uploads/Tickets)
@@ -178,8 +168,8 @@ const sendMessage = async (req, res) => {
               let messageContent = null;
               let messageSender = null;
 
-              if (message && message.trim()) {
-                messageContent = message.trim();
+              if (text && text.trim()) {
+                messageContent = text.trim();
                 messageSender = req.user.fullname || req.user.email || 'Kỹ thuật viên';
                 console.log(`📧 [sendMessage] Including message content in email: "${messageContent.substring(0, 50)}${messageContent.length > 50 ? '...' : ''}"`);
               }
@@ -253,7 +243,6 @@ const sendMessage = async (req, res) => {
       console.warn('⚠️ [WebSocket] Failed to broadcast message:', wsError.message);
     }
 
-    console.log(`✅ [sendMessage] END - Success, statusChanged=${statusChanged}, newStatus=${newStatus}`);
     res.json({
       success: true,
       message: 'Tin nhắn đã được gửi thành công',
