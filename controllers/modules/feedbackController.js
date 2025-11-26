@@ -554,9 +554,22 @@ const getTechnicalStatsByUserId = async (req, res) => {
 
     console.log(`🔍 [getTechnicalStatsByUserId] Querying tickets with assignedTo:`, assignedToQuery);
 
-    const allTickets = await Ticket.find({
-      assignedTo: assignedToQuery
-    }).lean();
+    // Handle query differently based on assignedToQuery type
+    let allTickets;
+    if (typeof assignedToQuery === 'object' && assignedToQuery.$in) {
+      // Query for both email string and ObjectId using $or
+      allTickets = await Ticket.find({
+        $or: [
+          { assignedTo: assignedToQuery.$in[0] }, // email string
+          { assignedTo: assignedToQuery.$in[1] }  // ObjectId
+        ]
+      }).lean();
+    } else {
+      // Normal query
+      allTickets = await Ticket.find({
+        assignedTo: assignedToQuery
+      }).lean();
+    }
 
     const totalTickets = allTickets.length;
     const closedTickets = allTickets.filter(t => t.status === 'Closed').length;
