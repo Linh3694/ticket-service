@@ -41,6 +41,7 @@ const {
   acceptFeedback,
   getTeamMemberFeedbackStats,
   getTechnicalStats,
+  getTechnicalStatsByUserId,
   addFeedback
 } = feedbackController;
 
@@ -88,6 +89,7 @@ module.exports = {
   acceptFeedback,
   getTeamMemberFeedbackStats,
   getTechnicalStats,
+  getTechnicalStatsByUserId,
   addFeedback,
 
   // Team management

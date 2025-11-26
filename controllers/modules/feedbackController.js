@@ -467,6 +467,166 @@ const getTechnicalStats = async (req, res) => {
 };
 
 /**
+ * Get technical stats for a specific user (for email service)
+ */
+const getTechnicalStatsByUserId = async (req, res) => {
+  try {
+    const { userId } = req.params;
+
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        message: 'User ID is required'
+      });
+    }
+
+    console.log(`🔍 [getTechnicalStatsByUserId] Getting stats for user: ${userId}`);
+
+    // Find the user
+    const user = await User.findById(userId).select('_id email fullname avatarUrl jobTitle department');
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    // Check if user is a support team member
+    const SupportTeamMember = require("../../models/SupportTeamMember");
+    const member = await SupportTeamMember.findOne({ email: user.email }).lean();
+
+    if (!member) {
+      return res.json({
+        success: true,
+        data: {
+          user: {
+            _id: user._id,
+            email: user.email,
+            fullname: user.fullname,
+            avatarUrl: user.avatarUrl || '',
+            jobTitle: user.jobTitle || '',
+            department: user.department || ''
+          },
+          summary: {
+            totalTickets: 0,
+            completedTickets: 0,
+            closedTickets: 0,
+            feedbackCount: 0,
+            completionRate: 0,
+            responseRate: 0,
+            averageRating: 0
+          },
+          ratingBreakdown: {
+            distribution: { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 },
+            topBadges: [],
+            totalBadges: 0,
+            totalUniqueAwards: 0
+          }
+        }
+      });
+    }
+
+    // Get all tickets assigned to this SupportTeamMember
+    const allTickets = await Ticket.find({
+      assignedTo: member.userId
+    }).lean();
+
+    const totalTickets = allTickets.length;
+    const closedTickets = allTickets.filter(t => t.status === 'Closed').length;
+    const completedTickets = allTickets.filter(t => ['Done', 'Closed'].includes(t.status)).length;
+
+    // Get tickets with feedback
+    const ticketsWithFeedback = allTickets.filter(t => {
+      return t.feedback &&
+             typeof t.feedback === 'object' &&
+             t.feedback.rating &&
+             t.feedback.rating >= 1 &&
+             t.feedback.rating <= 5;
+    });
+
+    let averageRating = 0;
+    let ratingDistribution = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
+    let badgeCounts = {};
+    let topBadges = [];
+    let totalBadgesCount = 0;
+
+    if (ticketsWithFeedback.length > 0) {
+      const ratings = ticketsWithFeedback.map(t => t.feedback.rating);
+      averageRating = ratings.reduce((sum, rating) => sum + rating, 0) / ratings.length;
+      averageRating = Math.round(averageRating * 10) / 10;
+
+      // Rating distribution
+      ratings.forEach(rating => {
+        ratingDistribution[rating] = (ratingDistribution[rating] || 0) + 1;
+      });
+
+      // Collect badges
+      const allBadges = ticketsWithFeedback
+        .filter(t => Array.isArray(t.feedback.badges) && t.feedback.badges.length > 0)
+        .flatMap(t => t.feedback.badges);
+
+      totalBadgesCount = allBadges.length;
+
+      allBadges.forEach(badge => {
+        if (badge) {
+          badgeCounts[badge] = (badgeCounts[badge] || 0) + 1;
+        }
+      });
+
+      // Get top 3 badges
+      topBadges = Object.entries(badgeCounts)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 3)
+        .map(([badge, count]) => ({ badge, count }));
+    }
+
+    const completionRate = totalTickets > 0 ? Math.round((completedTickets / totalTickets) * 100) : 0;
+    const responseRate = totalTickets > 0 ? Math.round((allTickets.filter(t => t.status !== 'Assigned').length / totalTickets) * 100) : 0;
+
+    const userStats = {
+      user: {
+        _id: user._id,
+        email: user.email,
+        fullname: user.fullname,
+        avatarUrl: user.avatarUrl || '',
+        jobTitle: user.jobTitle || '',
+        department: user.department || ''
+      },
+      summary: {
+        totalTickets,
+        completedTickets,
+        closedTickets,
+        feedbackCount: ticketsWithFeedback.length,
+        completionRate,
+        responseRate,
+        averageRating
+      },
+      ratingBreakdown: {
+        distribution: ratingDistribution,
+        topBadges,
+        totalBadges: totalBadgesCount,
+        totalUniqueAwards: Object.keys(badgeCounts).length
+      }
+    };
+
+    console.log(`✅ [getTechnicalStatsByUserId] Stats retrieved for ${user.fullname}: ${totalTickets} tickets, avg rating: ${averageRating}`);
+
+    res.json({
+      success: true,
+      data: userStats
+    });
+
+  } catch (error) {
+    console.error('❌ Error fetching technical stats for user:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Không thể tải thống kê kỹ thuật viên'
+    });
+  }
+};
+
+/**
  * Add feedback (legacy function)
  */
 const addFeedback = async (req, res) => {
@@ -521,5 +681,6 @@ module.exports = {
   acceptFeedback,
   getTeamMemberFeedbackStats,
   getTechnicalStats,
+  getTechnicalStatsByUserId,
   addFeedback
 };
