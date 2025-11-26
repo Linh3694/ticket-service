@@ -48,7 +48,10 @@ const ticketSchema = new mongoose.Schema(
       updatedAt: { type: Date, default: Date.now },
       acceptedAt: { type: Date }, // Thời điểm nhân viên tiếp nhận
       closedAt: { type: Date }, // Thời điểm đóng ticket
-      
+
+      // Email thread tracking
+      emailMessageId: { type: String }, // Message-ID của email tạo ticket gốc
+
       sla: {
         type: Date, // Hạn chót (deadline) dựa trên priority
       },

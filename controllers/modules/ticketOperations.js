@@ -605,13 +605,20 @@ const createTicket = async (req, res) => {
 
       // Call email service to send ticket creation notification
       const axios = require('axios');
-      await axios.post(`${emailServiceUrl}/notify-ticket-creation`, {
+      const emailResponse = await axios.post(`${emailServiceUrl}/notify-ticket-creation`, {
         ticketId: newTicket._id.toString(),
         recipientEmail: creatorEmail
       }, {
         timeout: 10000,
         headers: { 'Content-Type': 'application/json' }
       });
+
+      // Save Message-ID for email threading
+      if (emailResponse.data.success && emailResponse.data.messageId) {
+        newTicket.emailMessageId = emailResponse.data.messageId;
+        await newTicket.save();
+        console.log(`💾 [createTicket] Saved email Message-ID: ${emailResponse.data.messageId}`);
+      }
 
       console.log(`✅ [createTicket] Ticket creation confirmation email sent to ${creatorEmail}`);
     } catch (emailError) {

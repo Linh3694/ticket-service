@@ -152,11 +152,23 @@ const sendMessage = async (req, res) => {
           const emailServiceUrl = process.env.EMAIL_SERVICE_URL || 'http://localhost:5030';
           console.log(`📧 [sendMessage] Support team changed status, sending email to ${ticket.creator.email}`);
 
+          // Prepare message content if status changed to "Waiting for Customer"
+          let messageContent = null;
+          let messageSender = null;
+
+          if (newStatus === 'Waiting for Customer' && message && message.trim()) {
+            messageContent = message.trim();
+            messageSender = req.user.fullname || req.user.email || 'Kỹ thuật viên';
+            console.log(`📧 [sendMessage] Including message content in email: "${messageContent.substring(0, 50)}${messageContent.length > 50 ? '...' : ''}"`);
+          }
+
           // Call email service asynchronously
           const axios = require('axios');
           axios.post(`${emailServiceUrl}/notify-ticket-status`, {
             ticketId: ticket._id.toString(),
-            recipientEmail: ticket.creator.email
+            recipientEmail: ticket.creator.email,
+            messageContent: messageContent,
+            messageSender: messageSender
           }, {
             timeout: 10000,
             headers: { 'Content-Type': 'application/json' }
