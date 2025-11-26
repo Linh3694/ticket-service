@@ -558,15 +558,21 @@ const getTechnicalStatsByUserId = async (req, res) => {
     // Handle query differently based on assignedToQuery type
     let allTickets;
     if (typeof assignedToQuery === 'object' && assignedToQuery.$in) {
-      console.log(`🔍 [getTechnicalStatsByUserId] Using $or query for mixed types`);
-      // Query for both email string and ObjectId using $or
-      allTickets = await Ticket.find({
-        $or: [
-          { assignedTo: assignedToQuery.$in[0] }, // email string
-          { assignedTo: assignedToQuery.$in[1] }  // ObjectId
-        ]
-      }).lean();
-      console.log(`🔍 [getTechnicalStatsByUserId] $or query found ${allTickets.length} tickets`);
+      console.log(`🔍 [getTechnicalStatsByUserId] Using separate queries for mixed types`);
+      // Query separately for string and ObjectId to avoid cast errors
+      const [stringTickets, objectIdTickets] = await Promise.all([
+        Ticket.find({ assignedTo: assignedToQuery.$in[0] }).lean().catch(err => {
+          console.log(`🔍 [getTechnicalStatsByUserId] String query failed:`, err.message);
+          return [];
+        }),
+        Ticket.find({ assignedTo: assignedToQuery.$in[1] }).lean().catch(err => {
+          console.log(`🔍 [getTechnicalStatsByUserId] ObjectId query failed:`, err.message);
+          return [];
+        })
+      ]);
+
+      allTickets = [...stringTickets, ...objectIdTickets];
+      console.log(`🔍 [getTechnicalStatsByUserId] Separate queries found ${stringTickets.length} string tickets + ${objectIdTickets.length} ObjectId tickets = ${allTickets.length} total`);
     } else {
       console.log(`🔍 [getTechnicalStatsByUserId] Using normal query`);
       // Normal query
