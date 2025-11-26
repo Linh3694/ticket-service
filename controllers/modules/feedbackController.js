@@ -528,8 +528,34 @@ const getTechnicalStatsByUserId = async (req, res) => {
     }
 
     // Get all tickets assigned to this SupportTeamMember
+    // Handle both ObjectId and string (email) userId
+    let assignedToQuery;
+
+    if (!member.userId) {
+      // No userId in support team member, use user._id
+      assignedToQuery = user._id;
+    } else if (typeof member.userId === 'string') {
+      // member.userId is string - could be ObjectId string or email
+      if (member.userId.match(/^[0-9a-fA-F]{24}$/)) {
+        // It's an ObjectId string
+        assignedToQuery = member.userId;
+      } else {
+        // It's an email string - this shouldn't happen in migrated data
+        // But if it does, query for both email (old data) and userId (new data)
+        assignedToQuery = { $in: [member.userId, user._id] };
+      }
+    } else if (typeof member.userId === 'object' && member.userId._id) {
+      // member.userId is populated object
+      assignedToQuery = member.userId._id;
+    } else {
+      // Fallback to user._id
+      assignedToQuery = user._id;
+    }
+
+    console.log(`🔍 [getTechnicalStatsByUserId] Querying tickets with assignedTo:`, assignedToQuery);
+
     const allTickets = await Ticket.find({
-      assignedTo: member.userId
+      assignedTo: assignedToQuery
     }).lean();
 
     const totalTickets = allTickets.length;
