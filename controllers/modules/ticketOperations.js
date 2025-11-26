@@ -586,15 +586,15 @@ const createTicket = async (req, res) => {
       }
     }
 
-    // 5️⃣ Send notifications
-    try {
-      if (assignedToId) {
-        await notificationService.sendTicketAssigned(newTicket, assignedToId);
-      }
-    } catch (notificationError) {
-      console.error('❌ Notification error:', notificationError);
-      // Don't fail the request if notification fails
-    }
+    // 5️⃣ Send notifications (removed - method doesn't exist)
+    // try {
+    //   if (assignedToId) {
+    //     await notificationService.sendTicketAssigned(newTicket, assignedToId);
+    //   }
+    // } catch (notificationError) {
+    //   console.error('❌ Notification error:', notificationError);
+    //   // Don't fail the request if notification fails
+    // }
 
     // 6️⃣ Send ticket creation confirmation email to creator
     try {
