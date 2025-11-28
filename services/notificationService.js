@@ -112,13 +112,16 @@ class NotificationService {
     try {
       console.log(`📢 [Notification] Sending notification to user ${userId}: ${title}`);
 
-      // 1. Gửi push notification
+      // 1. Gửi push notification trực tiếp qua Expo
       const pushTokens = await this.getUserPushTokens(userId);
       if (pushTokens.length > 0) {
         await this.sendPushNotifications(pushTokens, title, body, data);
+        console.log(`✅ [Notification] Sent push notification to user ${userId} with ${pushTokens.length} tokens`);
+      } else {
+        console.log(`⚠️ [Notification] No push tokens found for user ${userId}`);
       }
 
-      // 2. Gửi qua notification service (nếu có)
+      // 2. Gửi qua notification service (nếu có và khả dụng)
       if (this.enabled) {
         try {
           const notificationData = {
@@ -135,8 +138,10 @@ class NotificationService {
           await this.api.post('/api/notifications/send', notificationData);
           console.log(`✅ [Notification] Sent service notification to user ${userId}`);
         } catch (serviceError) {
-          console.warn(`⚠️  [Notification] Service notification failed, continuing with push only:`, serviceError.message);
+          console.warn(`⚠️  [Notification] External notification service failed (${serviceError.response?.status || serviceError.code}), falling back to push only:`, serviceError.message);
         }
+      } else {
+        console.log(`ℹ️ [Notification] External notification service disabled, using push only`);
       }
 
       // 3. Publish to Redis for real-time updates
@@ -151,6 +156,7 @@ class NotificationService {
 
     } catch (error) {
       console.error(`❌ [Notification] Error sending notification to user ${userId}:`, error);
+      throw error;
     }
   }
 
@@ -189,37 +195,35 @@ class NotificationService {
   // Gửi thông báo ticket mới
   async sendNewTicketNotification(ticket) {
     try {
-      if (!this.enabled) {
-        console.log('📢 [Ticket Service] Notification integration disabled');
+      console.log(`📢 [Ticket Service] Sending new ticket notification for ${ticket.ticketCode}`);
+
+      const recipients = this.getTicketNotificationRecipients(ticket);
+
+      if (recipients.length === 0) {
+        console.log(`⚠️ [Ticket Service] No recipients for new ticket notification`);
         return;
       }
 
-      const recipients = this.getTicketNotificationRecipients(ticket);
-      
-      const notificationData = {
-        type: 'new_ticket',
-        title: 'New Support Ticket',
-        body: `New ticket #${ticket.ticketNumber || ticket.ticketCode}: ${ticket.title}`,
-        recipients: recipients,
-        data: {
-          ticketId: ticket._id,
-          ticketCode: ticket.ticketCode || ticket.ticketNumber,
-          ticketTitle: ticket.title,
-          priority: ticket.priority,
-          status: ticket.status,
-          creator: ticket.createdBy || ticket.creator
-        },
-        priority: this.getPriorityLevel(ticket.priority),
-        sound: 'default',
-        badge: 1
-      };
+      const title = '🎫 Ticket mới';
+      const body = `Ticket mới #${ticket.ticketNumber || ticket.ticketCode}: ${ticket.title}`;
 
-      // Gọi trực tiếp API notification-service
-      const response = await this.api.post('/api/notifications/send', notificationData);
-      
-      if (response.data && response.data.success) {
-        console.log('📢 [Ticket Service] Sent new ticket notification:', ticket.ticketCode);
+      // Gửi trực tiếp push notifications cho từng recipient
+      for (const userId of recipients) {
+        try {
+          await this.sendNotificationToUser(userId, title, body, {
+            ticketId: ticket._id.toString(),
+            ticketCode: ticket.ticketCode || ticket.ticketNumber,
+            action: 'new_ticket_admin',
+            category: ticket.category,
+            priority: ticket.priority,
+            timestamp: new Date().toISOString()
+          }, 'new_ticket_admin');
+        } catch (error) {
+          console.error(`❌ [Ticket Service] Failed to send new ticket notification to user ${userId}:`, error.message);
+        }
       }
+
+      console.log(`✅ [Ticket Service] Sent new ticket notification to ${recipients.length} recipients`);
 
       // Fallback: gửi qua Redis
       await this.publishNotificationEvent('ticket_created', {
@@ -233,14 +237,7 @@ class NotificationService {
 
     } catch (error) {
       console.error('❌ [Ticket Service] Error sending new ticket notification:', error.message);
-      
-      // Fallback: chỉ gửi qua Redis
-      await this.publishNotificationEvent('ticket_created', {
-        ticketId: ticket._id,
-        ticketCode: ticket.ticketCode,
-        title: ticket.title,
-        priority: ticket.priority
-      });
+      throw error;
     }
   }
 
@@ -917,28 +914,39 @@ class NotificationService {
   async healthCheck() {
     try {
       if (!this.enabled) {
-        return { status: 'disabled', message: 'Notification integration is disabled' };
+        return {
+          status: 'disabled',
+          message: 'Notification integration is disabled',
+          fallback: 'push_only',
+          note: 'Using direct Expo push notifications only'
+        };
       }
 
       const response = await this.api.get('/health');
-      
+
       if (response.status === 200) {
-        return { 
-          status: 'connected', 
+        return {
+          status: 'connected',
           message: 'Notification Service is reachable',
-          url: this.notificationServiceUrl
+          url: this.notificationServiceUrl,
+          fallback: 'none'
         };
       }
-      
-      return { 
-        status: 'error', 
-        message: `Unexpected response: ${response.status}` 
+
+      return {
+        status: 'error',
+        message: `Unexpected response: ${response.status}`,
+        url: this.notificationServiceUrl,
+        fallback: 'push_only',
+        note: 'Will fallback to direct Expo push notifications'
       };
     } catch (error) {
-      return { 
-        status: 'error', 
+      return {
+        status: 'error',
         message: error.message,
-        url: this.notificationServiceUrl 
+        url: this.notificationServiceUrl,
+        fallback: 'push_only',
+        note: 'External service unavailable, using direct Expo push notifications'
       };
     }
   }

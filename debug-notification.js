@@ -122,6 +122,47 @@ try {
 
 console.log('\n🎉 Debug test completed!');
 
+// Test direct Expo push notification capability
+console.log('\n📱 Testing direct Expo push notification capability...');
+
+const { Expo } = require('expo-server-sdk');
+
+async function testDirectPushNotification() {
+  try {
+    // Test Expo SDK
+    const expo = new Expo();
+
+    // Test token validation
+    const testToken = 'ExponentPushToken[test-token-123]';
+    const isValidToken = Expo.isExpoPushToken(testToken);
+
+    console.log(`✅ Expo SDK loaded successfully`);
+    console.log(`✅ Test token validation: ${isValidToken ? 'PASS' : 'FAIL'}`);
+
+    // Test chunking (simulate sending to multiple devices)
+    const messages = [
+      {
+        to: testToken,
+        sound: 'default',
+        title: 'Test Notification',
+        body: 'This is a test push notification from ticket-service',
+        data: { test: true }
+      }
+    ];
+
+    const chunks = expo.chunkPushNotifications(messages);
+    console.log(`✅ Message chunking works: ${chunks.length} chunk(s) created`);
+
+    console.log('✅ Direct push notification capability: READY');
+
+    return true;
+  } catch (error) {
+    console.log('❌ Direct push notification test failed:');
+    console.log('   Error:', error.message);
+    return false;
+  }
+}
+
 // Test HTTP call to check if notification service is reachable
 console.log('\n🌐 Testing notification service connectivity...');
 
@@ -138,18 +179,12 @@ async function testNotificationService() {
 
     console.log('✅ Notification service is reachable:', response.status);
     console.log('   Response:', response.data);
+    return true;
   } catch (error) {
     console.log('❌ Notification service not reachable:');
     console.log('   Error:', error.code || error.message);
-    console.log('   URL: http://172.16.20.115:5001/health');
-
-    if (error.code === 'ECONNREFUSED') {
-      console.log('   → Service is not running or firewall blocking');
-    } else if (error.code === 'ENOTFOUND') {
-      console.log('   → DNS resolution failed - check network connectivity');
-    } else if (error.code === 'ETIMEDOUT') {
-      console.log('   → Connection timeout - service may be slow or unreachable');
-    }
+    console.log('   → Will use direct push notifications instead');
+    return false;
   }
 }
 
@@ -164,31 +199,49 @@ async function testTicketService() {
 
     console.log('✅ Ticket service is reachable:', response.status);
     console.log('   Response:', response.data);
+    return true;
   } catch (error) {
     console.log('❌ Ticket service not reachable:');
     console.log('   Error:', error.code || error.message);
-    console.log('   URL: http://172.16.20.113:5001/health');
-
-    if (error.code === 'ECONNREFUSED') {
-      console.log('   → Service is not running');
-    }
+    return false;
   }
 }
 
 async function runConnectivityTests() {
   console.log('🔍 Running connectivity tests...\n');
 
-  await testNotificationService();
-  console.log();
-  await testTicketService();
+  const [directPushOk, notificationServiceOk, ticketServiceOk] = await Promise.all([
+    testDirectPushNotification(),
+    testNotificationService(),
+    testTicketService()
+  ]);
+
+  console.log('\n📊 Test Results Summary:');
+  console.log(`   Direct Push Notifications: ${directPushOk ? '✅ READY' : '❌ FAILED'}`);
+  console.log(`   External Notification Service: ${notificationServiceOk ? '✅ AVAILABLE' : '❌ UNAVAILABLE'}`);
+  console.log(`   Ticket Service: ${ticketServiceOk ? '✅ RUNNING' : '❌ NOT RUNNING'}`);
 
   console.log('\n💡 Next steps:');
-  console.log('1. If services are not running, start them:');
-  console.log('   cd ticket-service && npm start');
-  console.log('   # Start notification service similarly');
-  console.log('2. Check device tokens in database');
-  console.log('3. Test actual ticket state change');
-  console.log('4. Check mobile app logs for received notifications');
+
+  if (directPushOk && ticketServiceOk) {
+    console.log('✅ System is ready for direct push notifications!');
+    console.log('1. Test actual ticket state change to trigger notifications');
+    console.log('2. Check mobile device for received push notifications');
+    console.log('3. Verify device tokens are properly stored in database');
+  } else {
+    if (!directPushOk) {
+      console.log('❌ Fix Expo SDK issues before proceeding');
+    }
+    if (!ticketServiceOk) {
+      console.log('❌ Start ticket service: cd ticket-service && npm start');
+    }
+  }
+
+  console.log('\n🔧 Troubleshooting:');
+  console.log('- Check device tokens in Users collection');
+  console.log('- Verify Expo push tokens are valid');
+  console.log('- Test with actual mobile device, not simulator');
+  console.log('- Check mobile app notification permissions');
 }
 
 // Run connectivity tests
