@@ -36,7 +36,22 @@ async function testJWTIntegration() {
       }
     };
 
-    console.log('Sending test event to:', ticketEndpoint);
+    // First, let's decode the token to verify it
+    const jwt = require('jsonwebtoken');
+    const JWT_SECRET = process.env.JWT_SECRET || 'breakpoint';
+
+    console.log('\n🔍 Decoding JWT token for verification...');
+    try {
+      const decoded = jwt.decode(token);
+      console.log('Decoded token payload:', decoded);
+
+      const verified = jwt.verify(token, JWT_SECRET);
+      console.log('✅ Token verification successful:', verified.user);
+    } catch (decodeError) {
+      console.error('❌ Token decode/verification failed:', decodeError.message);
+    }
+
+    console.log('\n📡 Sending test event to:', ticketEndpoint);
     console.log('Event data:', JSON.stringify(testEvent, null, 2));
 
     const response = await axios.post(ticketEndpoint, testEvent, {
