@@ -986,6 +986,57 @@ class NotificationService {
   }
 
   // =========================
+  // TESTING METHODS
+  // =========================
+
+  // Test Redis pub/sub connection
+  async testRedisConnection() {
+    try {
+      console.log('🔍 [Test] Testing Redis pub/sub connection...');
+
+      // Test publish
+      await redisClient.publish('test_channel', JSON.stringify({
+        test: 'ticket-service-redis-connection',
+        timestamp: new Date().toISOString()
+      }));
+
+      console.log('✅ [Test] Redis pub/sub test successful');
+      return { success: true, message: 'Redis connection working' };
+    } catch (error) {
+      console.error('❌ [Test] Redis test failed:', error.message);
+      return { success: false, error: error.message };
+    }
+  }
+
+  // Test Frappe event sending
+  async testFrappeEvent() {
+    try {
+      console.log('🔍 [Test] Testing Frappe event sending...');
+
+      const testEvent = {
+        ticketId: 'test123',
+        ticketCode: 'TEST-001',
+        oldStatus: 'Waiting for Customer',
+        newStatus: 'Done',
+        recipients: ['linh.nguyenhai@wellspring.edu.vn'],
+        notification: {
+          title: '✅ Test Ticket Completed',
+          body: 'This is a test notification from ticket-service',
+          action: 'test_notification'
+        }
+      };
+
+      await this.sendEventToFrappe('test_ticket_event', testEvent);
+
+      console.log('✅ [Test] Frappe event test successful');
+      return { success: true, message: 'Event sent to Frappe successfully' };
+    } catch (error) {
+      console.error('❌ [Test] Frappe event test failed:', error.message);
+      return { success: false, error: error.message };
+    }
+  }
+
+  // =========================
   // FRAPPE INTEGRATION
   // =========================
 
@@ -1007,25 +1058,30 @@ class NotificationService {
       // Option 1: Send via Redis (recommended)
       await redisClient.publish('frappe_notifications', JSON.stringify(frappeEvent));
 
-      // Option 2: Send via direct API call (fallback)
+      // Option 2: Send via direct API call (using service-to-service auth)
       try {
         const axios = require('axios');
         const frappeUrl = process.env.FRAPPE_API_URL || 'http://172.16.20.130:8000';
 
-        await axios.post(`${frappeUrl}/api/method/ticket_service_integration.handle_ticket_event`, {
+        // Use service authentication token instead of API key
+        const serviceAuthToken = process.env.FRAPPE_SERVICE_TOKEN || process.env.JWT_SECRET || 'service-token';
+
+        await axios.post(`${frappeUrl}/api/method/erp.api.notification.ticket.handle_ticket_event`, {
           event_type: eventType,
           event_data: eventData
         }, {
           headers: {
-            'Authorization': `token ${process.env.FRAPPE_API_KEY}:${process.env.FRAPPE_API_SECRET}`,
-            'Content-Type': 'application/json'
+            'Authorization': `Bearer ${serviceAuthToken}`,
+            'Content-Type': 'application/json',
+            'X-Service-Token': serviceAuthToken  // Custom header for service auth
           },
           timeout: 5000
         });
 
         console.log(`✅ [Frappe Integration] Event sent via API: ${eventType}`);
       } catch (apiError) {
-        console.warn(`⚠️ [Frappe Integration] API call failed, relying on Redis only:`, apiError.message);
+        console.warn(`⚠️ [Frappe Integration] API call failed, falling back to Redis:`, apiError.message);
+        // Don't throw error, let Redis handle it
       }
 
       console.log(`✅ [Frappe Integration] Event published: ${eventType}`);
