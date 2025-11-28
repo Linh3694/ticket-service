@@ -18,8 +18,7 @@ const createServiceToken = (payload = {}, expiresIn = '1h') => {
       iss: 'ticket-service',
       aud: 'frappe',
       ...payload,
-      iat: Math.floor(Date.now() / 1000),
-      exp: Math.floor(Date.now() / 1000) + (expiresIn === '1h' ? 3600 : 86400) // 1 hour or custom
+      iat: Math.floor(Date.now() / 1000)
     };
 
     const token = jwt.sign(tokenPayload, JWT_SECRET, {
