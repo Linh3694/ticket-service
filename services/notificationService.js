@@ -112,13 +112,21 @@ class NotificationService {
     try {
       console.log(`📢 [Notification] Sending notification to user ${userId}: ${title}`);
 
-      // 1. Gửi push notification trực tiếp qua Expo
+      let pushNotificationSent = false;
+      let serviceNotificationSent = false;
+
+      // 1. Gửi push notification trực tiếp qua Expo (nếu có token)
       const pushTokens = await this.getUserPushTokens(userId);
       if (pushTokens.length > 0) {
-        await this.sendPushNotifications(pushTokens, title, body, data);
-        console.log(`✅ [Notification] Sent push notification to user ${userId} with ${pushTokens.length} tokens`);
+        try {
+          await this.sendPushNotifications(pushTokens, title, body, data);
+          pushNotificationSent = true;
+          console.log(`✅ [Notification] Sent push notification to user ${userId} with ${pushTokens.length} tokens`);
+        } catch (pushError) {
+          console.error(`❌ [Notification] Push notification failed for user ${userId}:`, pushError.message);
+        }
       } else {
-        console.log(`⚠️ [Notification] No push tokens found for user ${userId}`);
+        console.log(`ℹ️ [Notification] No push tokens found for user ${userId} (this is normal for web-only users)`);
       }
 
       // 2. Gửi qua notification service (nếu có và khả dụng)
@@ -136,23 +144,35 @@ class NotificationService {
           };
 
           await this.api.post('/api/notifications/send', notificationData);
+          serviceNotificationSent = true;
           console.log(`✅ [Notification] Sent service notification to user ${userId}`);
         } catch (serviceError) {
-          console.warn(`⚠️  [Notification] External notification service failed (${serviceError.response?.status || serviceError.code}), falling back to push only:`, serviceError.message);
+          console.warn(`⚠️  [Notification] External notification service failed (${serviceError.response?.status || serviceError.code}), notification may not reach user:`, serviceError.message);
         }
       } else {
-        console.log(`ℹ️ [Notification] External notification service disabled, using push only`);
+        console.log(`ℹ️ [Notification] External notification service disabled`);
       }
 
-      // 3. Publish to Redis for real-time updates
+      // 3. Luôn publish to Redis for real-time updates (web app, etc.)
       await this.publishNotificationEvent('notification_sent', {
         userId,
         title,
         body,
         data,
         type,
+        pushNotificationSent,
+        serviceNotificationSent,
         timestamp: new Date()
       });
+      console.log(`✅ [Notification] Published real-time notification event for user ${userId}`);
+
+      // Summary
+      const channels = [];
+      if (pushNotificationSent) channels.push('push');
+      if (serviceNotificationSent) channels.push('service');
+      channels.push('realtime');
+
+      console.log(`📊 [Notification] Notification sent to user ${userId} via: ${channels.join(', ')}`);
 
     } catch (error) {
       console.error(`❌ [Notification] Error sending notification to user ${userId}:`, error);
