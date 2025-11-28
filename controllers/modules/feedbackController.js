@@ -70,15 +70,16 @@ const acceptFeedback = async (req, res) => {
 
     await ticket.save();
 
-    // Send notification to assigned user
+    // 📱 Send push notification for ticket feedback
     try {
       if (ticket.assignedTo) {
-        // TODO: Implement sendFeedbackReceived notification
-        // await notificationService.sendFeedbackReceived(ticket, feedback);
-        console.log('📢 [Feedback] Feedback accepted, notification to assigned user can be implemented here');
+        await notificationService.sendTicketFeedbackNotification(
+          ticket,
+          feedback
+        );
       }
     } catch (notificationError) {
-      console.error('❌ Notification error:', notificationError);
+      console.error('❌ Feedback notification error:', notificationError);
       // Don't fail the request if notification fails
     }
 

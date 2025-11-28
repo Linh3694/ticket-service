@@ -1,4 +1,5 @@
 const Ticket = require("../../models/Ticket");
+const notificationService = require('../../services/notificationService');
 const { TICKET_LOGS } = require('../../utils/logFormatter');
 const { logMessageSent, logTicketStatusChanged } = require('../../utils/logger');
 const { Types, connection } = require('mongoose');
@@ -261,6 +262,19 @@ const sendMessage = async (req, res) => {
       }
     } catch (wsError) {
       console.warn('⚠️ [WebSocket] Failed to broadcast message:', wsError.message);
+    }
+
+    // 📱 Send push notification for user reply
+    if (isCreator && ticket.assignedTo) {
+      try {
+        await notificationService.sendUserReplyNotification(
+          ticket,
+          req.user
+        );
+      } catch (notificationError) {
+        console.error('❌ User reply notification failed:', notificationError.message);
+        // Continue with message sending even if notification fails
+      }
     }
 
     res.json({

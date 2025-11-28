@@ -346,36 +346,487 @@ class NotificationService {
     console.log('👤 [Ticket Service] Sent agent status notification:', agentId, status);
   }
 
-  // Helper methods
-  getTicketNotificationRecipients(ticket) {
-    const recipients = new Set();
-    
-    // Thêm assignee
-    if (ticket.assignedTo) {
-      recipients.add(ticket.assignedTo);
+  // =========================
+  // TICKET STATE CHANGE NOTIFICATIONS
+  // =========================
+
+  // Mapping trạng thái ticket với thông báo
+  getTicketStatusNotificationConfig(status) {
+    const statusConfigs = {
+      'Assigned': {
+        title: '🎫 Ticket đã được gán',
+        body: 'Ticket #{ticketCode} đã được gán cho bạn: {title}',
+        priority: 'high',
+        action: 'ticket_assigned'
+      },
+      'Processing': {
+        title: '⚡ Ticket đang xử lý',
+        body: 'Ticket #{ticketCode} đang được xử lý: {title}',
+        priority: 'normal',
+        action: 'ticket_processing'
+      },
+      'Waiting for Customer': {
+        title: '⏳ Chờ phản hồi khách hàng',
+        body: 'Ticket #{ticketCode} đang chờ phản hồi của bạn: {title}',
+        priority: 'normal',
+        action: 'ticket_waiting'
+      },
+      'Done': {
+        title: '✅ Ticket đã hoàn thành',
+        body: 'Ticket #{ticketCode} đã được giải quyết: {title}',
+        priority: 'normal',
+        action: 'ticket_done'
+      },
+      'Closed': {
+        title: '🔒 Ticket đã đóng',
+        body: 'Ticket #{ticketCode} đã được đóng: {title}',
+        priority: 'low',
+        action: 'ticket_closed'
+      },
+      'Cancelled': {
+        title: '❌ Ticket đã hủy',
+        body: 'Ticket #{ticketCode} đã bị hủy: {title}',
+        priority: 'low',
+        action: 'ticket_cancelled'
+      }
+    };
+
+    return statusConfigs[status] || null;
+  }
+
+  // Gửi thông báo khi trạng thái ticket thay đổi
+  async sendTicketStatusChangeNotification(ticket, oldStatus, newStatus, changedBy = null) {
+    try {
+      console.log(`📢 [Ticket Service] Sending status change notification: ${oldStatus} → ${newStatus}`);
+
+      const statusConfig = this.getTicketStatusNotificationConfig(newStatus);
+      if (!statusConfig) {
+        console.log(`⚠️ [Ticket Service] No notification config for status: ${newStatus}`);
+        return;
+      }
+
+      // Lấy danh sách người nhận
+      const recipients = this.getTicketNotificationRecipients(ticket, newStatus);
+
+      // Loại bỏ người thực hiện hành động khỏi danh sách nhận notification
+      const filteredRecipients = changedBy
+        ? recipients.filter(userId => userId.toString() !== changedBy.toString())
+        : recipients;
+
+      if (filteredRecipients.length === 0) {
+        console.log(`⚠️ [Ticket Service] No recipients for ticket status notification`);
+        return;
+      }
+
+      // Tạo nội dung thông báo
+      const title = statusConfig.title;
+      const body = statusConfig.body
+        .replace('{ticketCode}', ticket.ticketCode || ticket.ticketNumber || 'Unknown')
+        .replace('{title}', ticket.title || 'No title');
+
+      console.log(`📢 [Ticket Service] Sending to ${filteredRecipients.length} recipients:`, filteredRecipients);
+
+      // Gửi push notification cho từng user
+      const pushPromises = filteredRecipients.map(async (userId) => {
+        try {
+          await this.sendNotificationToUser(userId, title, body, {
+            ticketId: ticket._id.toString(),
+            ticketCode: ticket.ticketCode || ticket.ticketNumber,
+            action: statusConfig.action,
+            oldStatus: oldStatus,
+            newStatus: newStatus,
+            changedBy: changedBy,
+            priority: statusConfig.priority,
+            timestamp: new Date().toISOString()
+          }, 'ticket_status_change');
+        } catch (error) {
+          console.error(`❌ [Ticket Service] Failed to send notification to user ${userId}:`, error.message);
+        }
+      });
+
+      await Promise.all(pushPromises);
+
+      // Publish real-time event qua Redis
+      await this.publishNotificationEvent('ticket_status_changed', {
+        ticketId: ticket._id.toString(),
+        ticketCode: ticket.ticketCode || ticket.ticketNumber,
+        title: ticket.title,
+        oldStatus: oldStatus,
+        newStatus: newStatus,
+        changedBy: changedBy,
+        recipients: filteredRecipients,
+        priority: statusConfig.priority
+      });
+
+      console.log(`✅ [Ticket Service] Sent ticket status change notification for ${ticket.ticketCode}`);
+    } catch (error) {
+      console.error('❌ [Ticket Service] Error sending ticket status change notification:', error);
+      throw error;
     }
-    
-    // Thêm support team
+  }
+
+  // Gửi thông báo khi ticket được assign
+  async sendTicketAssignmentNotification(ticket, assignedTo, assignedBy) {
+    try {
+      console.log(`👤 [Ticket Service] Sending assignment notification for ticket ${ticket.ticketCode}`);
+
+      const title = '👤 Ticket được gán';
+      const body = `Ticket #${ticket.ticketCode || ticket.ticketNumber} đã được gán cho bạn: ${ticket.title || 'No title'}`;
+
+      await this.sendNotificationToUser(assignedTo._id || assignedTo, title, body, {
+        ticketId: ticket._id.toString(),
+        ticketCode: ticket.ticketCode || ticket.ticketNumber,
+        action: 'ticket_assigned',
+        assignedBy: assignedBy._id || assignedBy,
+        priority: 'high',
+        timestamp: new Date().toISOString()
+      }, 'ticket_assignment');
+
+      // Publish real-time event
+      await this.publishNotificationEvent('ticket_assigned', {
+        ticketId: ticket._id.toString(),
+        ticketCode: ticket.ticketCode || ticket.ticketNumber,
+        title: ticket.title,
+        assignedTo: assignedTo._id || assignedTo,
+        assignedBy: assignedBy._id || assignedBy
+      });
+
+      console.log(`✅ [Ticket Service] Sent assignment notification for ${ticket.ticketCode}`);
+    } catch (error) {
+      console.error('❌ [Ticket Service] Error sending ticket assignment notification:', error);
+      throw error;
+    }
+  }
+
+  // =========================
+  // ADMIN/SUPPORT TEAM NOTIFICATIONS
+  // =========================
+
+  // Gửi thông báo ticket mới cho support team
+  async sendNewTicketToSupportTeamNotification(ticket) {
+    try {
+      console.log(`🆕 [Ticket Service] Sending new ticket notification to support team: ${ticket.ticketCode}`);
+
+      // Lấy tất cả support team members
+      const supportTeamRecipients = await this.getSupportTeamRecipients(ticket.category);
+
+      if (supportTeamRecipients.length === 0) {
+        console.log(`⚠️ [Ticket Service] No support team members found for category: ${ticket.category}`);
+        return;
+      }
+
+      const title = '🎫 Ticket mới';
+      const body = `Ticket mới #${ticket.ticketCode || ticket.ticketNumber}: ${ticket.title || 'No title'} (${ticket.category})`;
+
+      // Gửi cho từng support team member
+      const pushPromises = supportTeamRecipients.map(async (userId) => {
+        try {
+          await this.sendNotificationToUser(userId, title, body, {
+            ticketId: ticket._id.toString(),
+            ticketCode: ticket.ticketCode || ticket.ticketNumber,
+            action: 'new_ticket_admin',
+            category: ticket.category,
+            priority: ticket.priority,
+            timestamp: new Date().toISOString()
+          }, 'new_ticket_admin');
+        } catch (error) {
+          console.error(`❌ [Ticket Service] Failed to send new ticket notification to user ${userId}:`, error.message);
+        }
+      });
+
+      await Promise.all(pushPromises);
+
+      // Publish real-time event
+      await this.publishNotificationEvent('new_ticket_admin', {
+        ticketId: ticket._id.toString(),
+        ticketCode: ticket.ticketCode || ticket.ticketNumber,
+        title: ticket.title,
+        category: ticket.category,
+        priority: ticket.priority,
+        supportTeamRecipients: supportTeamRecipients
+      });
+
+      console.log(`✅ [Ticket Service] Sent new ticket notification to ${supportTeamRecipients.length} support team members`);
+    } catch (error) {
+      console.error('❌ [Ticket Service] Error sending new ticket to support team notification:', error);
+      throw error;
+    }
+  }
+
+  // Gửi thông báo khi người dùng phản hồi ticket
+  async sendUserReplyNotification(ticket, messageSender) {
+    try {
+      console.log(`💬 [Ticket Service] Sending user reply notification for ticket ${ticket.ticketCode}`);
+
+      if (!ticket.assignedTo) {
+        console.log(`⚠️ [Ticket Service] No assignee for ticket ${ticket.ticketCode}, skipping user reply notification`);
+        return;
+      }
+
+      const title = '💬 Người dùng đã phản hồi';
+      const body = `Ticket #${ticket.ticketCode || ticket.ticketNumber} có phản hồi mới: ${ticket.title || 'No title'}`;
+
+      await this.sendNotificationToUser(ticket.assignedTo, title, body, {
+        ticketId: ticket._id.toString(),
+        ticketCode: ticket.ticketCode || ticket.ticketNumber,
+        action: 'user_reply',
+        messageSender: messageSender._id || messageSender,
+        priority: 'high',
+        timestamp: new Date().toISOString()
+      }, 'user_reply');
+
+      // Publish real-time event
+      await this.publishNotificationEvent('user_reply', {
+        ticketId: ticket._id.toString(),
+        ticketCode: ticket.ticketCode || ticket.ticketNumber,
+        title: ticket.title,
+        assignedTo: ticket.assignedTo,
+        messageSender: messageSender._id || messageSender
+      });
+
+      console.log(`✅ [Ticket Service] Sent user reply notification for ${ticket.ticketCode}`);
+    } catch (error) {
+      console.error('❌ [Ticket Service] Error sending user reply notification:', error);
+      throw error;
+    }
+  }
+
+  // Gửi thông báo khi ticket bị cancel
+  async sendTicketCancelledNotification(ticket, cancelledBy) {
+    try {
+      console.log(`❌ [Ticket Service] Sending ticket cancelled notification for ${ticket.ticketCode}`);
+
+      let recipients = [];
+
+      if (ticket.assignedTo) {
+        // Gửi cho assignedTo nếu có
+        recipients = [ticket.assignedTo];
+      } else {
+        // Gửi cho all support team nếu chưa assign
+        recipients = await this.getSupportTeamRecipients(ticket.category);
+      }
+
+      if (recipients.length === 0) {
+        console.log(`⚠️ [Ticket Service] No recipients for cancelled ticket ${ticket.ticketCode}`);
+        return;
+      }
+
+      const title = '❌ Ticket đã bị hủy';
+      const body = `Ticket #${ticket.ticketCode || ticket.ticketNumber} đã bị hủy: ${ticket.title || 'No title'}`;
+
+      // Gửi cho tất cả recipients
+      const pushPromises = recipients.map(async (userId) => {
+        try {
+          await this.sendNotificationToUser(userId, title, body, {
+            ticketId: ticket._id.toString(),
+            ticketCode: ticket.ticketCode || ticket.ticketNumber,
+            action: 'ticket_cancelled_admin',
+            cancelledBy: cancelledBy._id || cancelledBy,
+            cancellationReason: ticket.cancellationReason,
+            priority: 'high',
+            timestamp: new Date().toISOString()
+          }, 'ticket_cancelled_admin');
+        } catch (error) {
+          console.error(`❌ [Ticket Service] Failed to send cancellation notification to user ${userId}:`, error.message);
+        }
+      });
+
+      await Promise.all(pushPromises);
+
+      // Publish real-time event
+      await this.publishNotificationEvent('ticket_cancelled_admin', {
+        ticketId: ticket._id.toString(),
+        ticketCode: ticket.ticketCode || ticket.ticketNumber,
+        title: ticket.title,
+        cancelledBy: cancelledBy._id || cancelledBy,
+        cancellationReason: ticket.cancellationReason,
+        recipients: recipients
+      });
+
+      console.log(`✅ [Ticket Service] Sent cancellation notification to ${recipients.length} recipients`);
+    } catch (error) {
+      console.error('❌ [Ticket Service] Error sending ticket cancelled notification:', error);
+      throw error;
+    }
+  }
+
+  // Gửi thông báo khi ticket được xác nhận hoàn thành bởi người dùng
+  async sendTicketCompletionConfirmationNotification(ticket, confirmedBy) {
+    try {
+      console.log(`✅ [Ticket Service] Sending completion confirmation notification for ${ticket.ticketCode}`);
+
+      if (!ticket.assignedTo) {
+        console.log(`⚠️ [Ticket Service] No assignee for ticket ${ticket.ticketCode}, skipping completion confirmation notification`);
+        return;
+      }
+
+      const title = '✅ Ticket đã được xác nhận hoàn thành';
+      const body = `Ticket #${ticket.ticketCode || ticket.ticketNumber} đã được xác nhận hoàn thành: ${ticket.title || 'No title'}`;
+
+      await this.sendNotificationToUser(ticket.assignedTo, title, body, {
+        ticketId: ticket._id.toString(),
+        ticketCode: ticket.ticketCode || ticket.ticketNumber,
+        action: 'completion_confirmed',
+        confirmedBy: confirmedBy._id || confirmedBy,
+        priority: 'normal',
+        timestamp: new Date().toISOString()
+      }, 'completion_confirmed');
+
+      // Publish real-time event
+      await this.publishNotificationEvent('completion_confirmed', {
+        ticketId: ticket._id.toString(),
+        ticketCode: ticket.ticketCode || ticket.ticketNumber,
+        title: ticket.title,
+        assignedTo: ticket.assignedTo,
+        confirmedBy: confirmedBy._id || confirmedBy
+      });
+
+      console.log(`✅ [Ticket Service] Sent completion confirmation notification for ${ticket.ticketCode}`);
+    } catch (error) {
+      console.error('❌ [Ticket Service] Error sending completion confirmation notification:', error);
+      throw error;
+    }
+  }
+
+  // Gửi thông báo khi ticket được feedback với số sao
+  async sendTicketFeedbackNotification(ticket, feedbackData) {
+    try {
+      console.log(`⭐ [Ticket Service] Sending feedback notification for ${ticket.ticketCode}`);
+
+      if (!ticket.assignedTo) {
+        console.log(`⚠️ [Ticket Service] No assignee for ticket ${ticket.ticketCode}, skipping feedback notification`);
+        return;
+      }
+
+      const title = '⭐ Ticket nhận được đánh giá';
+      const body = `Ticket #${ticket.ticketCode || ticket.ticketNumber} nhận được ${feedbackData.rating} sao: ${ticket.title || 'No title'}`;
+
+      await this.sendNotificationToUser(ticket.assignedTo, title, body, {
+        ticketId: ticket._id.toString(),
+        ticketCode: ticket.ticketCode || ticket.ticketNumber,
+        action: 'ticket_feedback_received',
+        rating: feedbackData.rating,
+        feedbackComment: feedbackData.comment,
+        priority: 'normal',
+        timestamp: new Date().toISOString()
+      }, 'ticket_feedback_received');
+
+      // Publish real-time event
+      await this.publishNotificationEvent('ticket_feedback_received', {
+        ticketId: ticket._id.toString(),
+        ticketCode: ticket.ticketCode || ticket.ticketNumber,
+        title: ticket.title,
+        assignedTo: ticket.assignedTo,
+        rating: feedbackData.rating,
+        feedbackComment: feedbackData.comment
+      });
+
+      console.log(`✅ [Ticket Service] Sent feedback notification for ${ticket.ticketCode}`);
+    } catch (error) {
+      console.error('❌ [Ticket Service] Error sending feedback notification:', error);
+      throw error;
+    }
+  }
+
+  // Helper: Lấy danh sách support team members cho một category
+  async getSupportTeamRecipients(category) {
+    try {
+      // Import models dynamically to avoid circular dependencies
+      const SupportTeamMember = require('../models/SupportTeamMember');
+
+      // Tìm support team members có role phù hợp với category
+      const categoryRoleMap = {
+        'Software': ['Software', 'Overall'],
+        'Camera': ['Camera', 'Overall'],
+        'Network': ['Network System', 'Overall'],
+        'Bell System': ['Bell System', 'Overall'],
+        'Account': ['Account', 'Overall'],
+        'Email Ticket': ['Email Ticket', 'Overall'],
+        'Overall': ['Overall']
+      };
+
+      const roles = categoryRoleMap[category] || ['Overall'];
+
+      const supportMembers = await SupportTeamMember.find({
+        isActive: true,
+        roles: { $in: roles }
+      }).populate('userId', '_id').lean();
+
+      const userIds = supportMembers
+        .map(member => member.userId?._id || member.userId)
+        .filter(id => id != null);
+
+      return [...new Set(userIds)]; // Remove duplicates
+    } catch (error) {
+      console.error('❌ [Ticket Service] Error getting support team recipients:', error);
+      return [];
+    }
+  }
+
+  // Helper methods
+  getTicketNotificationRecipients(ticket, status = null) {
+    const recipients = new Set();
+
+    // Thêm assignee hiện tại
+    if (ticket.assignedTo) {
+      const assigneeId = ticket.assignedTo._id || ticket.assignedTo;
+      if (assigneeId) recipients.add(assigneeId);
+    }
+
+    // Thêm support team members
     if (ticket.supportTeam && Array.isArray(ticket.supportTeam)) {
       ticket.supportTeam.forEach(member => {
-        recipients.add(member._id || member);
+        const memberId = member._id || member.userId || member;
+        if (memberId) recipients.add(memberId);
       });
     }
-    
+
     // Thêm watchers/followers
     if (ticket.followers && Array.isArray(ticket.followers)) {
       ticket.followers.forEach(follower => {
-        recipients.add(follower._id || follower);
+        const followerId = follower._id || follower.userId || follower;
+        if (followerId) recipients.add(followerId);
       });
     }
-    
-    // Không gửi cho người tạo ticket (trừ khi họ là assignee)
+
+    // Status-specific recipient logic
     const creator = ticket.createdBy || ticket.creator;
-    if (creator && !ticket.assignedTo) {
-      recipients.delete(creator);
+    const creatorId = creator?._id || creator;
+
+    if (status) {
+      switch (status) {
+        case 'Done':
+        case 'Closed':
+          // Gửi cho creator khi ticket hoàn thành/đóng
+          if (creatorId) recipients.add(creatorId);
+          break;
+
+        case 'Waiting for Customer':
+          // Gửi cho creator khi cần phản hồi
+          if (creatorId) recipients.add(creatorId);
+          break;
+
+        case 'Cancelled':
+          // Có thể gửi cho creator khi ticket bị hủy
+          if (creatorId) recipients.add(creatorId);
+          break;
+
+        default:
+          // Cho các status khác, không gửi cho creator trừ khi họ là assignee
+          if (creatorId && !ticket.assignedTo) {
+            recipients.delete(creatorId);
+          }
+          break;
+      }
+    } else {
+      // Không gửi cho creator trừ khi họ là assignee (default behavior)
+      if (creatorId && !ticket.assignedTo) {
+        recipients.delete(creatorId);
+      }
     }
-    
-    return Array.from(recipients);
+
+    // Convert to array and filter out null/undefined values
+    return Array.from(recipients).filter(id => id != null);
   }
 
   getPriorityLevel(priority) {

@@ -654,15 +654,13 @@ const createTicket = async (req, res) => {
       }
     }
 
-    // 5️⃣ Send notifications (removed - method doesn't exist)
-    // try {
-    //   if (assignedToId) {
-    //     await notificationService.sendTicketAssigned(newTicket, assignedToId);
-    //   }
-    // } catch (notificationError) {
-    //   console.error('❌ Notification error:', notificationError);
-    //   // Don't fail the request if notification fails
-    // }
+    // 5️⃣ Send notifications to support team for new ticket
+    try {
+      await notificationService.sendNewTicketToSupportTeamNotification(newTicket);
+    } catch (notificationError) {
+      console.error('❌ New ticket notification error:', notificationError);
+      // Don't fail the request if notification fails
+    }
 
     // 6️⃣ Send ticket creation confirmation email to creator
     try {
@@ -1062,16 +1060,6 @@ const updateTicket = async (req, res) => {
         ticket.closedAt = new Date();
         console.log(`⏰ [updateTicket] Set closedAt for ticket ${ticket.ticketCode}`);
       }
-
-      // 📧 Send email notification when status changes
-      console.log(`📧 [updateTicket] Preparing to send email notification for status change`);
-
-      try {
-        await sendStatusChangeEmail(ticket, previousStatus, updates.status, req.user);
-      } catch (error) {
-        console.error(`❌ [updateTicket] Error sending email notification for ticket ${ticket.ticketCode}:`, error.message);
-        // Continue with ticket update even if email notification fails
-      }
     }
 
     // 📝 Log other field changes
@@ -1099,6 +1087,33 @@ const updateTicket = async (req, res) => {
 
     await ticket.save();
     console.log(`✅ [updateTicket] Ticket updated: ${ticketId}`);
+
+    // 📧 Send email notification after ticket is saved to ensure correct status
+    if (updates.status && updates.status !== previousStatus) {
+      console.log(`📧 [updateTicket] Preparing to send email notification for status change`);
+
+      try {
+        await sendStatusChangeEmail(ticket, previousStatus, updates.status, req.user);
+      } catch (error) {
+        console.error(`❌ [updateTicket] Error sending email notification for ticket ${ticket.ticketCode}:`, error.message);
+        // Continue with ticket update even if email notification fails
+      }
+
+      // 📱 Send push notification for status change
+      console.log(`📱 [updateTicket] Sending push notification for status change`);
+
+      try {
+        await notificationService.sendTicketStatusChangeNotification(
+          ticket,
+          previousStatus,
+          updates.status,
+          req.user._id
+        );
+      } catch (pushError) {
+        console.error(`❌ [updateTicket] Error sending push notification for ticket ${ticket.ticketCode}:`, pushError.message);
+        // Continue with ticket update even if push notification fails
+      }
+    }
 
     // Populate for response
     await ticket.populate('creator', 'fullname email avatarUrl jobTitle department');
@@ -1247,6 +1262,22 @@ const assignTicketToMe = async (req, res) => {
     await ticket.save();
     console.log(`💾 [assignTicketToMe] After save: ticket.assignedTo=${ticket.assignedTo}`);
 
+    // 📱 Send push notification for ticket assignment
+    if (oldStatus !== 'Processing') {
+      console.log(`📱 [assignTicketToMe] Sending assignment notification`);
+
+      try {
+        await notificationService.sendTicketAssignmentNotification(
+          ticket,
+          req.user,
+          req.user // assignedBy = current user
+        );
+      } catch (notificationError) {
+        console.error('❌ [assignTicketToMe] Assignment notification failed:', notificationError.message);
+        // Continue with ticket assignment even if notification fails
+      }
+    }
+
     // Populate for response
     console.log(`🔍 [assignTicketToMe] Before populate: ticket.assignedTo=${ticket.assignedTo}`);
     await ticket.populate('creator', 'fullname email avatarUrl jobTitle department');
@@ -1363,6 +1394,17 @@ const cancelTicketWithReason = async (req, res) => {
       logTicketCancelled(userEmail, userName, ticket._id.toString(), cancelReason.trim());
     } catch (logErr) {
       console.warn('⚠️  Failed to log ticket cancellation:', logErr.message);
+    }
+
+    // 📱 Send push notification for ticket cancellation
+    try {
+      await notificationService.sendTicketCancelledNotification(
+        ticket,
+        req.user
+      );
+    } catch (notificationError) {
+      console.error('❌ Ticket cancellation notification failed:', notificationError.message);
+      // Continue with ticket cancellation even if notification fails
     }
     
     // Populate for response
