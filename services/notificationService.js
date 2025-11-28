@@ -764,17 +764,23 @@ class NotificationService {
   getTicketNotificationRecipients(ticket, status = null) {
     const recipients = new Set();
 
-    // Thêm assignee hiện tại
+    // Thêm assignee hiện tại (ưu tiên cao nhất)
     if (ticket.assignedTo) {
       const assigneeId = ticket.assignedTo._id || ticket.assignedTo;
-      if (assigneeId) recipients.add(assigneeId);
+      if (assigneeId) {
+        recipients.add(assigneeId);
+        console.log(`📢 [Recipients] Added assignee: ${assigneeId}`);
+      }
     }
 
     // Thêm support team members
     if (ticket.supportTeam && Array.isArray(ticket.supportTeam)) {
       ticket.supportTeam.forEach(member => {
         const memberId = member._id || member.userId || member;
-        if (memberId) recipients.add(memberId);
+        if (memberId) {
+          recipients.add(memberId);
+          console.log(`📢 [Recipients] Added support team member: ${memberId}`);
+        }
       });
     }
 
@@ -782,7 +788,10 @@ class NotificationService {
     if (ticket.followers && Array.isArray(ticket.followers)) {
       ticket.followers.forEach(follower => {
         const followerId = follower._id || follower.userId || follower;
-        if (followerId) recipients.add(followerId);
+        if (followerId) {
+          recipients.add(followerId);
+          console.log(`📢 [Recipients] Added follower: ${followerId}`);
+        }
       });
     }
 
@@ -795,35 +804,50 @@ class NotificationService {
         case 'Done':
         case 'Closed':
           // Gửi cho creator khi ticket hoàn thành/đóng
-          if (creatorId) recipients.add(creatorId);
+          if (creatorId) {
+            recipients.add(creatorId);
+            console.log(`📢 [Recipients] Added creator for completion: ${creatorId}`);
+          }
           break;
 
         case 'Waiting for Customer':
           // Gửi cho creator khi cần phản hồi
-          if (creatorId) recipients.add(creatorId);
+          if (creatorId) {
+            recipients.add(creatorId);
+            console.log(`📢 [Recipients] Added creator for waiting: ${creatorId}`);
+          }
           break;
 
         case 'Cancelled':
-          // Có thể gửi cho creator khi ticket bị hủy
-          if (creatorId) recipients.add(creatorId);
+          // Gửi cho creator khi ticket bị hủy
+          if (creatorId) {
+            recipients.add(creatorId);
+            console.log(`📢 [Recipients] Added creator for cancellation: ${creatorId}`);
+          }
           break;
 
         default:
           // Cho các status khác, không gửi cho creator trừ khi họ là assignee
           if (creatorId && !ticket.assignedTo) {
-            recipients.delete(creatorId);
+            // Nếu không có assignee, vẫn gửi cho creator
+            recipients.add(creatorId);
+            console.log(`📢 [Recipients] Added creator (no assignee): ${creatorId}`);
           }
           break;
       }
     } else {
-      // Không gửi cho creator trừ khi họ là assignee (default behavior)
-      if (creatorId && !ticket.assignedTo) {
-        recipients.delete(creatorId);
+      // Không có status specified, gửi cho assignee hoặc creator
+      if (!ticket.assignedTo && creatorId) {
+        recipients.add(creatorId);
+        console.log(`📢 [Recipients] Added creator (fallback): ${creatorId}`);
       }
     }
 
     // Convert to array and filter out null/undefined values
-    return Array.from(recipients).filter(id => id != null);
+    const finalRecipients = Array.from(recipients).filter(id => id != null);
+    console.log(`📢 [Recipients] Final count for status "${status}": ${finalRecipients.length} recipients`);
+
+    return finalRecipients;
   }
 
   getPriorityLevel(priority) {
