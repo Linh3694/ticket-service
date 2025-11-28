@@ -217,7 +217,7 @@ class NotificationService {
     try {
       console.log(`📢 [Ticket Service] Sending new ticket notification for ${ticket.ticketCode}`);
 
-      const recipients = this.getTicketNotificationRecipients(ticket);
+      const recipients = await this.getTicketNotificationRecipients(ticket);
 
       if (recipients.length === 0) {
         console.log(`⚠️ [Ticket Service] No recipients for new ticket notification`);
@@ -423,7 +423,7 @@ class NotificationService {
       }
 
       // Lấy danh sách người nhận
-      const recipients = this.getTicketNotificationRecipients(ticket, newStatus);
+      const recipients = await this.getTicketNotificationRecipients(ticket, newStatus);
 
       // Loại bỏ người thực hiện hành động khỏi danh sách nhận notification
       const filteredRecipients = changedBy
@@ -582,12 +582,15 @@ class NotificationService {
     try {
       console.log(`💬 [Ticket Service] Processing user reply event for ticket ${ticket.ticketCode}`);
 
-      if (!ticket.assignedTo) {
-        console.log(`⚠️ [Ticket Service] No assignee for ticket ${ticket.ticketCode}, skipping user reply notification`);
+      // Lấy danh sách người nhận (chỉ assignee hiện tại)
+      const recipients = await this.getTicketNotificationRecipients(ticket, ticket.status);
+
+      if (recipients.length === 0) {
+        console.log(`⚠️ [Ticket Service] No recipients for user reply notification`);
         return;
       }
 
-      console.log(`💬 [Ticket Service] Sending event to Frappe for user reply`);
+      console.log(`💬 [Ticket Service] Sending event to Frappe for ${recipients.length} recipients`);
 
       // Gửi event về Frappe để Frappe handle notifications
       await this.sendEventToFrappe('user_reply', {
@@ -596,7 +599,7 @@ class NotificationService {
         title: ticket.title,
         assignedTo: ticket.assignedTo,
         messageSender: messageSender._id || messageSender,
-        recipients: [ticket.assignedTo],
+        recipients: recipients,
         notification: {
           title: '💬 Người dùng đã phản hồi',
           body: `Ticket #${ticket.ticketCode || ticket.ticketNumber} có phản hồi mới: ${ticket.title || 'No title'}`,
@@ -632,15 +635,8 @@ class NotificationService {
     try {
       console.log(`❌ [Ticket Service] Processing ticket cancelled event for ${ticket.ticketCode}`);
 
-      let recipients = [];
-
-      if (ticket.assignedTo) {
-        // Gửi cho assignedTo nếu có
-        recipients = [ticket.assignedTo];
-      } else {
-        // Gửi cho all support team nếu chưa assign
-        recipients = await this.getSupportTeamRecipients(ticket.category);
-      }
+      // Lấy danh sách người nhận
+      const recipients = await this.getTicketNotificationRecipients(ticket, 'Cancelled');
 
       if (recipients.length === 0) {
         console.log(`⚠️ [Ticket Service] No recipients for cancelled ticket ${ticket.ticketCode}`);
@@ -694,12 +690,15 @@ class NotificationService {
     try {
       console.log(`✅ [Ticket Service] Processing completion confirmation event for ${ticket.ticketCode}`);
 
-      if (!ticket.assignedTo) {
-        console.log(`⚠️ [Ticket Service] No assignee for ticket ${ticket.ticketCode}, skipping completion confirmation notification`);
+      // Lấy danh sách người nhận
+      const recipients = await this.getTicketNotificationRecipients(ticket, 'Done');
+
+      if (recipients.length === 0) {
+        console.log(`⚠️ [Ticket Service] No recipients for completion confirmation notification`);
         return;
       }
 
-      console.log(`✅ [Ticket Service] Sending event to Frappe for completion confirmation`);
+      console.log(`✅ [Ticket Service] Sending event to Frappe for ${recipients.length} recipients`);
 
       // Gửi event về Frappe để Frappe handle notifications
       await this.sendEventToFrappe('completion_confirmed', {
@@ -708,7 +707,7 @@ class NotificationService {
         title: ticket.title,
         assignedTo: ticket.assignedTo,
         confirmedBy: confirmedBy._id || confirmedBy,
-        recipients: [ticket.assignedTo],
+        recipients: recipients,
         notification: {
           title: '✅ Ticket đã được xác nhận hoàn thành',
           body: `Ticket #${ticket.ticketCode || ticket.ticketNumber} đã được xác nhận hoàn thành: ${ticket.title || 'No title'}`,
@@ -744,12 +743,15 @@ class NotificationService {
     try {
       console.log(`⭐ [Ticket Service] Processing feedback event for ${ticket.ticketCode}`);
 
-      if (!ticket.assignedTo) {
-        console.log(`⚠️ [Ticket Service] No assignee for ticket ${ticket.ticketCode}, skipping feedback notification`);
+      // Lấy danh sách người nhận
+      const recipients = await this.getTicketNotificationRecipients(ticket, 'Closed');
+
+      if (recipients.length === 0) {
+        console.log(`⚠️ [Ticket Service] No recipients for feedback notification`);
         return;
       }
 
-      console.log(`⭐ [Ticket Service] Sending event to Frappe for feedback notification`);
+      console.log(`⭐ [Ticket Service] Sending event to Frappe for ${recipients.length} recipients`);
 
       // Gửi event về Frappe để Frappe handle notifications
       await this.sendEventToFrappe('ticket_feedback_received', {
@@ -759,7 +761,7 @@ class NotificationService {
         assignedTo: ticket.assignedTo,
         rating: feedbackData.rating,
         feedbackComment: feedbackData.comment,
-        recipients: [ticket.assignedTo],
+        recipients: recipients,
         notification: {
           title: '⭐ Ticket nhận được đánh giá',
           body: `Ticket #${ticket.ticketCode || ticket.ticketNumber} nhận được ${feedbackData.rating} sao: ${ticket.title || 'No title'}`,
@@ -814,13 +816,13 @@ class NotificationService {
       const supportMembers = await SupportTeamMember.find({
         isActive: true,
         roles: { $in: roles }
-      }).populate('userId', '_id').lean();
+      }).populate('userId', 'email').lean();
 
-      const userIds = supportMembers
-        .map(member => member.userId?._id || member.userId)
-        .filter(id => id != null);
+      const emails = supportMembers
+        .map(member => member.userId?.email)
+        .filter(email => email != null);
 
-      return [...new Set(userIds)]; // Remove duplicates
+      return [...new Set(emails)]; // Remove duplicates
     } catch (error) {
       console.error('❌ [Ticket Service] Error getting support team recipients:', error);
       return [];
@@ -828,38 +830,44 @@ class NotificationService {
   }
 
   // Helper methods
-  getTicketNotificationRecipients(ticket, status = null) {
+  async getTicketNotificationRecipients(ticket, status = null) {
     const recipients = new Set();
 
-    // Thêm assignee hiện tại (ưu tiên cao nhất)
+    // Thêm assignee hiện tại (lấy email từ database)
     if (ticket.assignedTo) {
-      const assigneeId = ticket.assignedTo._id || ticket.assignedTo;
-      if (assigneeId) {
-        recipients.add(assigneeId);
-        console.log(`📢 [Recipients] Added assignee: ${assigneeId}`);
+      const assigneeEmail = await this.getUserEmailById(ticket.assignedTo._id || ticket.assignedTo);
+      if (assigneeEmail) {
+        recipients.add(assigneeEmail);
+        console.log(`📢 [Recipients] Added assignee: ${assigneeEmail}`);
       }
     }
 
-    // Thêm support team members
+    // Thêm support team members (lấy email từ database)
     if (ticket.supportTeam && Array.isArray(ticket.supportTeam)) {
-      ticket.supportTeam.forEach(member => {
+      for (const member of ticket.supportTeam) {
         const memberId = member._id || member.userId || member;
         if (memberId) {
-          recipients.add(memberId);
-          console.log(`📢 [Recipients] Added support team member: ${memberId}`);
+          const memberEmail = await this.getUserEmailById(memberId);
+          if (memberEmail) {
+            recipients.add(memberEmail);
+            console.log(`📢 [Recipients] Added support team member: ${memberEmail}`);
+          }
         }
-      });
+      }
     }
 
-    // Thêm watchers/followers
+    // Thêm watchers/followers (lấy email từ database)
     if (ticket.followers && Array.isArray(ticket.followers)) {
-      ticket.followers.forEach(follower => {
+      for (const follower of ticket.followers) {
         const followerId = follower._id || follower.userId || follower;
         if (followerId) {
-          recipients.add(followerId);
-          console.log(`📢 [Recipients] Added follower: ${followerId}`);
+          const followerEmail = await this.getUserEmailById(followerId);
+          if (followerEmail) {
+            recipients.add(followerEmail);
+            console.log(`📢 [Recipients] Added follower: ${followerEmail}`);
+          }
         }
-      });
+      }
     }
 
     // Status-specific recipient logic
@@ -872,24 +880,33 @@ class NotificationService {
         case 'Closed':
           // Gửi cho creator khi ticket hoàn thành/đóng
           if (creatorId) {
-            recipients.add(creatorId);
-            console.log(`📢 [Recipients] Added creator for completion: ${creatorId}`);
+            const creatorEmail = await this.getUserEmailById(creatorId);
+            if (creatorEmail) {
+              recipients.add(creatorEmail);
+              console.log(`📢 [Recipients] Added creator for completion: ${creatorEmail}`);
+            }
           }
           break;
 
         case 'Waiting for Customer':
           // Gửi cho creator khi cần phản hồi
           if (creatorId) {
-            recipients.add(creatorId);
-            console.log(`📢 [Recipients] Added creator for waiting: ${creatorId}`);
+            const creatorEmail = await this.getUserEmailById(creatorId);
+            if (creatorEmail) {
+              recipients.add(creatorEmail);
+              console.log(`📢 [Recipients] Added creator for waiting: ${creatorEmail}`);
+            }
           }
           break;
 
         case 'Cancelled':
           // Gửi cho creator khi ticket bị hủy
           if (creatorId) {
-            recipients.add(creatorId);
-            console.log(`📢 [Recipients] Added creator for cancellation: ${creatorId}`);
+            const creatorEmail = await this.getUserEmailById(creatorId);
+            if (creatorEmail) {
+              recipients.add(creatorEmail);
+              console.log(`📢 [Recipients] Added creator for cancellation: ${creatorEmail}`);
+            }
           }
           break;
 
@@ -897,24 +914,45 @@ class NotificationService {
           // Cho các status khác, không gửi cho creator trừ khi họ là assignee
           if (creatorId && !ticket.assignedTo) {
             // Nếu không có assignee, vẫn gửi cho creator
-            recipients.add(creatorId);
-            console.log(`📢 [Recipients] Added creator (no assignee): ${creatorId}`);
+            const creatorEmail = await this.getUserEmailById(creatorId);
+            if (creatorEmail) {
+              recipients.add(creatorEmail);
+              console.log(`📢 [Recipients] Added creator (no assignee): ${creatorEmail}`);
+            }
           }
           break;
       }
     } else {
       // Không có status specified, gửi cho assignee hoặc creator
       if (!ticket.assignedTo && creatorId) {
-        recipients.add(creatorId);
-        console.log(`📢 [Recipients] Added creator (fallback): ${creatorId}`);
+        const creatorEmail = await this.getUserEmailById(creatorId);
+        if (creatorEmail) {
+          recipients.add(creatorEmail);
+          console.log(`📢 [Recipients] Added creator (fallback): ${creatorEmail}`);
+        }
       }
     }
 
     // Convert to array and filter out null/undefined values
-    const finalRecipients = Array.from(recipients).filter(id => id != null);
+    const finalRecipients = Array.from(recipients).filter(email => email != null);
     console.log(`📢 [Recipients] Final count for status "${status}": ${finalRecipients.length} recipients`);
 
     return finalRecipients;
+  }
+
+  // Helper: Get user email by ID
+  async getUserEmailById(userId) {
+    try {
+      if (!userId) return null;
+
+      const User = require('../models/Users');
+      const user = await User.findById(userId).select('email').lean();
+
+      return user ? user.email : null;
+    } catch (error) {
+      console.error(`❌ [Notification] Error getting email for user ${userId}:`, error.message);
+      return null;
+    }
   }
 
   getPriorityLevel(priority) {
