@@ -1046,47 +1046,59 @@ class NotificationService {
       console.log(`🔄 [Frappe Integration] Sending event to Frappe: ${eventType}`);
 
       const frappeEvent = {
-        service: 'ticket-service',
-        event: eventType,
-        data: {
+        event_type: eventType,  // Changed from 'event' to 'event_type' to match Frappe endpoint
+        event_data: {
           ...eventData,
           timestamp: new Date().toISOString(),
           source: 'ticket-service'
         }
       };
 
-      // Option 1: Send via Redis (recommended)
-      await redisClient.publish('frappe_notifications', JSON.stringify(frappeEvent));
+      // Import JWT helper
+      const { getServiceAuthHeaders } = require('../utils/jwtHelper');
 
-      // Option 2: Send via direct API call (using service-to-service auth)
-      try {
-        const axios = require('axios');
-        const frappeUrl = process.env.FRAPPE_API_URL || 'http://172.16.20.130:8000';
+      // Get Frappe API URL from environment
+      const frappeApiUrl = process.env.FRAPPE_API_URL || 'http://172.16.20.130:8000';
+      const ticketEndpoint = `${frappeApiUrl}/api/method/erp.api.notification.ticket.handle_ticket_event`;
 
-        // Use service authentication token instead of API key
-        const serviceAuthToken = process.env.FRAPPE_SERVICE_TOKEN || process.env.JWT_SECRET || 'service-token';
+      // Send via HTTP API call with JWT authentication
+      const response = await this.api.post(ticketEndpoint, frappeEvent, {
+        headers: getServiceAuthHeaders(),
+        timeout: 30000
+      });
 
-        await axios.post(`${frappeUrl}/api/method/erp.api.notification.ticket.handle_ticket_event`, {
-          event_type: eventType,
-          event_data: eventData
-        }, {
-          headers: {
-            'Authorization': `Bearer ${serviceAuthToken}`,
-            'Content-Type': 'application/json',
-            'X-Service-Token': serviceAuthToken  // Custom header for service auth
-          },
-          timeout: 5000
-        });
-
-        console.log(`✅ [Frappe Integration] Event sent via API: ${eventType}`);
-      } catch (apiError) {
-        console.warn(`⚠️ [Frappe Integration] API call failed, falling back to Redis:`, apiError.message);
-        // Don't throw error, let Redis handle it
+      if (response.status === 200 && response.data?.success) {
+        console.log(`✅ [Frappe Integration] Event sent successfully via HTTP API: ${eventType}`);
+      } else {
+        console.warn(`⚠️ [Frappe Integration] Unexpected response from Frappe:`, response.status, response.data);
       }
 
-      console.log(`✅ [Frappe Integration] Event published: ${eventType}`);
+      console.log(`✅ [Frappe Integration] Event sent: ${eventType}`);
     } catch (error) {
-      console.error('❌ [Frappe Integration] Error sending event to Frappe:', error.message);
+      console.error('❌ [Frappe Integration] Error sending event to Frappe:', {
+        message: error.message,
+        status: error.response?.status,
+        data: error.response?.data,
+        url: error.config?.url
+      });
+
+      // Fallback: try Redis if HTTP fails
+      console.log('🔄 [Frappe Integration] Attempting fallback via Redis...');
+      try {
+        const fallbackEvent = {
+          service: 'ticket-service',
+          event: eventType,
+          data: {
+            ...eventData,
+            timestamp: new Date().toISOString(),
+            source: 'ticket-service'
+          }
+        };
+        await redisClient.publish('frappe_notifications', JSON.stringify(fallbackEvent));
+        console.log(`✅ [Frappe Integration] Event sent via Redis fallback: ${eventType}`);
+      } catch (redisError) {
+        console.error('❌ [Frappe Integration] Redis fallback also failed:', redisError.message);
+      }
     }
   }
 
