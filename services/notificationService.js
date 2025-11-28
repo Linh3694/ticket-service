@@ -414,7 +414,7 @@ class NotificationService {
   // Gửi thông báo khi trạng thái ticket thay đổi
   async sendTicketStatusChangeNotification(ticket, oldStatus, newStatus, changedBy = null) {
     try {
-      console.log(`📢 [Ticket Service] Sending status change notification: ${oldStatus} → ${newStatus}`);
+      console.log(`📢 [Ticket Service] Processing status change event: ${oldStatus} → ${newStatus}`);
 
       const statusConfig = this.getTicketStatusNotificationConfig(newStatus);
       if (!statusConfig) {
@@ -435,35 +435,37 @@ class NotificationService {
         return;
       }
 
-      // Tạo nội dung thông báo
-      const title = statusConfig.title;
-      const body = statusConfig.body
-        .replace('{ticketCode}', ticket.ticketCode || ticket.ticketNumber || 'Unknown')
-        .replace('{title}', ticket.title || 'No title');
+      console.log(`📢 [Ticket Service] Sending event to Frappe for ${filteredRecipients.length} recipients`);
 
-      console.log(`📢 [Ticket Service] Sending to ${filteredRecipients.length} recipients:`, filteredRecipients);
-
-      // Gửi push notification cho từng user
-      const pushPromises = filteredRecipients.map(async (userId) => {
-        try {
-          await this.sendNotificationToUser(userId, title, body, {
+      // Gửi event về Frappe để Frappe handle notifications
+      await this.sendEventToFrappe('ticket_status_changed', {
+        ticketId: ticket._id.toString(),
+        ticketCode: ticket.ticketCode || ticket.ticketNumber,
+        title: ticket.title,
+        oldStatus: oldStatus,
+        newStatus: newStatus,
+        changedBy: changedBy,
+        recipients: filteredRecipients,
+        priority: statusConfig.priority,
+        category: ticket.category,
+        creator: ticket.creator,
+        assignedTo: ticket.assignedTo,
+        notification: {
+          title: statusConfig.title,
+          body: statusConfig.body.replace('{ticketCode}', ticket.ticketCode || ticket.ticketNumber || 'Unknown').replace('{title}', ticket.title || 'No title'),
+          action: statusConfig.action,
+          data: {
             ticketId: ticket._id.toString(),
             ticketCode: ticket.ticketCode || ticket.ticketNumber,
             action: statusConfig.action,
             oldStatus: oldStatus,
             newStatus: newStatus,
-            changedBy: changedBy,
-            priority: statusConfig.priority,
-            timestamp: new Date().toISOString()
-          }, 'ticket_status_change');
-        } catch (error) {
-          console.error(`❌ [Ticket Service] Failed to send notification to user ${userId}:`, error.message);
+            priority: statusConfig.priority
+          }
         }
       });
 
-      await Promise.all(pushPromises);
-
-      // Publish real-time event qua Redis
+      // Vẫn publish real-time event cho ticket-service internal use
       await this.publishNotificationEvent('ticket_status_changed', {
         ticketId: ticket._id.toString(),
         ticketCode: ticket.ticketCode || ticket.ticketNumber,
@@ -475,9 +477,9 @@ class NotificationService {
         priority: statusConfig.priority
       });
 
-      console.log(`✅ [Ticket Service] Sent ticket status change notification for ${ticket.ticketCode}`);
+      console.log(`✅ [Ticket Service] Ticket status change event sent to Frappe for ${ticket.ticketCode}`);
     } catch (error) {
-      console.error('❌ [Ticket Service] Error sending ticket status change notification:', error);
+      console.error('❌ [Ticket Service] Error sending ticket status change event:', error);
       throw error;
     }
   }
@@ -522,7 +524,7 @@ class NotificationService {
   // Gửi thông báo ticket mới cho support team
   async sendNewTicketToSupportTeamNotification(ticket) {
     try {
-      console.log(`🆕 [Ticket Service] Sending new ticket notification to support team: ${ticket.ticketCode}`);
+      console.log(`🆕 [Ticket Service] Processing new ticket event for support team: ${ticket.ticketCode}`);
 
       // Lấy tất cả support team members
       const supportTeamRecipients = await this.getSupportTeamRecipients(ticket.category);
@@ -532,29 +534,34 @@ class NotificationService {
         return;
       }
 
-      const title = '🎫 Ticket mới';
-      const body = `Ticket mới #${ticket.ticketCode || ticket.ticketNumber}: ${ticket.title || 'No title'} (${ticket.category})`;
+      console.log(`🆕 [Ticket Service] Sending event to Frappe for ${supportTeamRecipients.length} support team members`);
 
-      // Gửi cho từng support team member
-      const pushPromises = supportTeamRecipients.map(async (userId) => {
-        try {
-          await this.sendNotificationToUser(userId, title, body, {
+      // Gửi event về Frappe để Frappe handle notifications
+      await this.sendEventToFrappe('new_ticket_created', {
+        ticketId: ticket._id.toString(),
+        ticketCode: ticket.ticketCode || ticket.ticketNumber,
+        title: ticket.title,
+        category: ticket.category,
+        priority: ticket.priority,
+        creator: ticket.creator,
+        assignedTo: ticket.assignedTo,
+        recipients: supportTeamRecipients,
+        notification: {
+          title: '🎫 Ticket mới',
+          body: `Ticket mới #${ticket.ticketCode || ticket.ticketNumber}: ${ticket.title || 'No title'} (${ticket.category})`,
+          action: 'new_ticket_admin',
+          data: {
             ticketId: ticket._id.toString(),
             ticketCode: ticket.ticketCode || ticket.ticketNumber,
             action: 'new_ticket_admin',
             category: ticket.category,
-            priority: ticket.priority,
-            timestamp: new Date().toISOString()
-          }, 'new_ticket_admin');
-        } catch (error) {
-          console.error(`❌ [Ticket Service] Failed to send new ticket notification to user ${userId}:`, error.message);
+            priority: ticket.priority
+          }
         }
       });
 
-      await Promise.all(pushPromises);
-
-      // Publish real-time event
-      await this.publishNotificationEvent('new_ticket_admin', {
+      // Vẫn publish real-time event cho ticket-service internal use
+      await this.publishNotificationEvent('ticket_created', {
         ticketId: ticket._id.toString(),
         ticketCode: ticket.ticketCode || ticket.ticketNumber,
         title: ticket.title,
@@ -563,9 +570,9 @@ class NotificationService {
         supportTeamRecipients: supportTeamRecipients
       });
 
-      console.log(`✅ [Ticket Service] Sent new ticket notification to ${supportTeamRecipients.length} support team members`);
+      console.log(`✅ [Ticket Service] New ticket event sent to Frappe for ${ticket.ticketCode}`);
     } catch (error) {
-      console.error('❌ [Ticket Service] Error sending new ticket to support team notification:', error);
+      console.error('❌ [Ticket Service] Error sending new ticket event:', error);
       throw error;
     }
   }
@@ -573,26 +580,38 @@ class NotificationService {
   // Gửi thông báo khi người dùng phản hồi ticket
   async sendUserReplyNotification(ticket, messageSender) {
     try {
-      console.log(`💬 [Ticket Service] Sending user reply notification for ticket ${ticket.ticketCode}`);
+      console.log(`💬 [Ticket Service] Processing user reply event for ticket ${ticket.ticketCode}`);
 
       if (!ticket.assignedTo) {
         console.log(`⚠️ [Ticket Service] No assignee for ticket ${ticket.ticketCode}, skipping user reply notification`);
         return;
       }
 
-      const title = '💬 Người dùng đã phản hồi';
-      const body = `Ticket #${ticket.ticketCode || ticket.ticketNumber} có phản hồi mới: ${ticket.title || 'No title'}`;
+      console.log(`💬 [Ticket Service] Sending event to Frappe for user reply`);
 
-      await this.sendNotificationToUser(ticket.assignedTo, title, body, {
+      // Gửi event về Frappe để Frappe handle notifications
+      await this.sendEventToFrappe('user_reply', {
         ticketId: ticket._id.toString(),
         ticketCode: ticket.ticketCode || ticket.ticketNumber,
-        action: 'user_reply',
+        title: ticket.title,
+        assignedTo: ticket.assignedTo,
         messageSender: messageSender._id || messageSender,
-        priority: 'high',
-        timestamp: new Date().toISOString()
-      }, 'user_reply');
+        recipients: [ticket.assignedTo],
+        notification: {
+          title: '💬 Người dùng đã phản hồi',
+          body: `Ticket #${ticket.ticketCode || ticket.ticketNumber} có phản hồi mới: ${ticket.title || 'No title'}`,
+          action: 'user_reply',
+          data: {
+            ticketId: ticket._id.toString(),
+            ticketCode: ticket.ticketCode || ticket.ticketNumber,
+            action: 'user_reply',
+            messageSender: messageSender._id || messageSender,
+            priority: 'high'
+          }
+        }
+      });
 
-      // Publish real-time event
+      // Vẫn publish real-time event cho ticket-service internal use
       await this.publishNotificationEvent('user_reply', {
         ticketId: ticket._id.toString(),
         ticketCode: ticket.ticketCode || ticket.ticketNumber,
@@ -601,9 +620,9 @@ class NotificationService {
         messageSender: messageSender._id || messageSender
       });
 
-      console.log(`✅ [Ticket Service] Sent user reply notification for ${ticket.ticketCode}`);
+      console.log(`✅ [Ticket Service] User reply event sent to Frappe for ${ticket.ticketCode}`);
     } catch (error) {
-      console.error('❌ [Ticket Service] Error sending user reply notification:', error);
+      console.error('❌ [Ticket Service] Error sending user reply event:', error);
       throw error;
     }
   }
@@ -611,7 +630,7 @@ class NotificationService {
   // Gửi thông báo khi ticket bị cancel
   async sendTicketCancelledNotification(ticket, cancelledBy) {
     try {
-      console.log(`❌ [Ticket Service] Sending ticket cancelled notification for ${ticket.ticketCode}`);
+      console.log(`❌ [Ticket Service] Processing ticket cancelled event for ${ticket.ticketCode}`);
 
       let recipients = [];
 
@@ -628,29 +647,32 @@ class NotificationService {
         return;
       }
 
-      const title = '❌ Ticket đã bị hủy';
-      const body = `Ticket #${ticket.ticketCode || ticket.ticketNumber} đã bị hủy: ${ticket.title || 'No title'}`;
+      console.log(`❌ [Ticket Service] Sending event to Frappe for ${recipients.length} recipients`);
 
-      // Gửi cho tất cả recipients
-      const pushPromises = recipients.map(async (userId) => {
-        try {
-          await this.sendNotificationToUser(userId, title, body, {
+      // Gửi event về Frappe để Frappe handle notifications
+      await this.sendEventToFrappe('ticket_cancelled', {
+        ticketId: ticket._id.toString(),
+        ticketCode: ticket.ticketCode || ticket.ticketNumber,
+        title: ticket.title,
+        cancelledBy: cancelledBy._id || cancelledBy,
+        cancellationReason: ticket.cancellationReason,
+        recipients: recipients,
+        notification: {
+          title: '❌ Ticket đã bị hủy',
+          body: `Ticket #${ticket.ticketCode || ticket.ticketNumber} đã bị hủy: ${ticket.title || 'No title'}`,
+          action: 'ticket_cancelled_admin',
+          data: {
             ticketId: ticket._id.toString(),
             ticketCode: ticket.ticketCode || ticket.ticketNumber,
             action: 'ticket_cancelled_admin',
             cancelledBy: cancelledBy._id || cancelledBy,
             cancellationReason: ticket.cancellationReason,
-            priority: 'high',
-            timestamp: new Date().toISOString()
-          }, 'ticket_cancelled_admin');
-        } catch (error) {
-          console.error(`❌ [Ticket Service] Failed to send cancellation notification to user ${userId}:`, error.message);
+            priority: 'high'
+          }
         }
       });
 
-      await Promise.all(pushPromises);
-
-      // Publish real-time event
+      // Vẫn publish real-time event cho ticket-service internal use
       await this.publishNotificationEvent('ticket_cancelled_admin', {
         ticketId: ticket._id.toString(),
         ticketCode: ticket.ticketCode || ticket.ticketNumber,
@@ -660,9 +682,9 @@ class NotificationService {
         recipients: recipients
       });
 
-      console.log(`✅ [Ticket Service] Sent cancellation notification to ${recipients.length} recipients`);
+      console.log(`✅ [Ticket Service] Ticket cancelled event sent to Frappe for ${ticket.ticketCode}`);
     } catch (error) {
-      console.error('❌ [Ticket Service] Error sending ticket cancelled notification:', error);
+      console.error('❌ [Ticket Service] Error sending ticket cancelled event:', error);
       throw error;
     }
   }
@@ -670,26 +692,38 @@ class NotificationService {
   // Gửi thông báo khi ticket được xác nhận hoàn thành bởi người dùng
   async sendTicketCompletionConfirmationNotification(ticket, confirmedBy) {
     try {
-      console.log(`✅ [Ticket Service] Sending completion confirmation notification for ${ticket.ticketCode}`);
+      console.log(`✅ [Ticket Service] Processing completion confirmation event for ${ticket.ticketCode}`);
 
       if (!ticket.assignedTo) {
         console.log(`⚠️ [Ticket Service] No assignee for ticket ${ticket.ticketCode}, skipping completion confirmation notification`);
         return;
       }
 
-      const title = '✅ Ticket đã được xác nhận hoàn thành';
-      const body = `Ticket #${ticket.ticketCode || ticket.ticketNumber} đã được xác nhận hoàn thành: ${ticket.title || 'No title'}`;
+      console.log(`✅ [Ticket Service] Sending event to Frappe for completion confirmation`);
 
-      await this.sendNotificationToUser(ticket.assignedTo, title, body, {
+      // Gửi event về Frappe để Frappe handle notifications
+      await this.sendEventToFrappe('completion_confirmed', {
         ticketId: ticket._id.toString(),
         ticketCode: ticket.ticketCode || ticket.ticketNumber,
-        action: 'completion_confirmed',
+        title: ticket.title,
+        assignedTo: ticket.assignedTo,
         confirmedBy: confirmedBy._id || confirmedBy,
-        priority: 'normal',
-        timestamp: new Date().toISOString()
-      }, 'completion_confirmed');
+        recipients: [ticket.assignedTo],
+        notification: {
+          title: '✅ Ticket đã được xác nhận hoàn thành',
+          body: `Ticket #${ticket.ticketCode || ticket.ticketNumber} đã được xác nhận hoàn thành: ${ticket.title || 'No title'}`,
+          action: 'completion_confirmed',
+          data: {
+            ticketId: ticket._id.toString(),
+            ticketCode: ticket.ticketCode || ticket.ticketNumber,
+            action: 'completion_confirmed',
+            confirmedBy: confirmedBy._id || confirmedBy,
+            priority: 'normal'
+          }
+        }
+      });
 
-      // Publish real-time event
+      // Vẫn publish real-time event cho ticket-service internal use
       await this.publishNotificationEvent('completion_confirmed', {
         ticketId: ticket._id.toString(),
         ticketCode: ticket.ticketCode || ticket.ticketNumber,
@@ -698,9 +732,9 @@ class NotificationService {
         confirmedBy: confirmedBy._id || confirmedBy
       });
 
-      console.log(`✅ [Ticket Service] Sent completion confirmation notification for ${ticket.ticketCode}`);
+      console.log(`✅ [Ticket Service] Completion confirmation event sent to Frappe for ${ticket.ticketCode}`);
     } catch (error) {
-      console.error('❌ [Ticket Service] Error sending completion confirmation notification:', error);
+      console.error('❌ [Ticket Service] Error sending completion confirmation event:', error);
       throw error;
     }
   }
@@ -708,27 +742,40 @@ class NotificationService {
   // Gửi thông báo khi ticket được feedback với số sao
   async sendTicketFeedbackNotification(ticket, feedbackData) {
     try {
-      console.log(`⭐ [Ticket Service] Sending feedback notification for ${ticket.ticketCode}`);
+      console.log(`⭐ [Ticket Service] Processing feedback event for ${ticket.ticketCode}`);
 
       if (!ticket.assignedTo) {
         console.log(`⚠️ [Ticket Service] No assignee for ticket ${ticket.ticketCode}, skipping feedback notification`);
         return;
       }
 
-      const title = '⭐ Ticket nhận được đánh giá';
-      const body = `Ticket #${ticket.ticketCode || ticket.ticketNumber} nhận được ${feedbackData.rating} sao: ${ticket.title || 'No title'}`;
+      console.log(`⭐ [Ticket Service] Sending event to Frappe for feedback notification`);
 
-      await this.sendNotificationToUser(ticket.assignedTo, title, body, {
+      // Gửi event về Frappe để Frappe handle notifications
+      await this.sendEventToFrappe('ticket_feedback_received', {
         ticketId: ticket._id.toString(),
         ticketCode: ticket.ticketCode || ticket.ticketNumber,
-        action: 'ticket_feedback_received',
+        title: ticket.title,
+        assignedTo: ticket.assignedTo,
         rating: feedbackData.rating,
         feedbackComment: feedbackData.comment,
-        priority: 'normal',
-        timestamp: new Date().toISOString()
-      }, 'ticket_feedback_received');
+        recipients: [ticket.assignedTo],
+        notification: {
+          title: '⭐ Ticket nhận được đánh giá',
+          body: `Ticket #${ticket.ticketCode || ticket.ticketNumber} nhận được ${feedbackData.rating} sao: ${ticket.title || 'No title'}`,
+          action: 'ticket_feedback_received',
+          data: {
+            ticketId: ticket._id.toString(),
+            ticketCode: ticket.ticketCode || ticket.ticketNumber,
+            action: 'ticket_feedback_received',
+            rating: feedbackData.rating,
+            feedbackComment: feedbackData.comment,
+            priority: 'normal'
+          }
+        }
+      });
 
-      // Publish real-time event
+      // Vẫn publish real-time event cho ticket-service internal use
       await this.publishNotificationEvent('ticket_feedback_received', {
         ticketId: ticket._id.toString(),
         ticketCode: ticket.ticketCode || ticket.ticketNumber,
@@ -738,9 +785,9 @@ class NotificationService {
         feedbackComment: feedbackData.comment
       });
 
-      console.log(`✅ [Ticket Service] Sent feedback notification for ${ticket.ticketCode}`);
+      console.log(`✅ [Ticket Service] Feedback event sent to Frappe for ${ticket.ticketCode}`);
     } catch (error) {
-      console.error('❌ [Ticket Service] Error sending feedback notification:', error);
+      console.error('❌ [Ticket Service] Error sending feedback event:', error);
       throw error;
     }
   }
@@ -897,6 +944,55 @@ class NotificationService {
       console.log(`📤 [Ticket Service] Published notification event: ${eventType}`);
     } catch (error) {
       console.error('❌ [Ticket Service] Error publishing notification event:', error.message);
+    }
+  }
+
+  // =========================
+  // FRAPPE INTEGRATION
+  // =========================
+
+  // Gửi event về Frappe để trigger notifications
+  async sendEventToFrappe(eventType, eventData) {
+    try {
+      console.log(`🔄 [Frappe Integration] Sending event to Frappe: ${eventType}`);
+
+      const frappeEvent = {
+        service: 'ticket-service',
+        event: eventType,
+        data: {
+          ...eventData,
+          timestamp: new Date().toISOString(),
+          source: 'ticket-service'
+        }
+      };
+
+      // Option 1: Send via Redis (recommended)
+      await redisClient.publish('frappe_notifications', JSON.stringify(frappeEvent));
+
+      // Option 2: Send via direct API call (fallback)
+      try {
+        const axios = require('axios');
+        const frappeUrl = process.env.FRAPPE_API_URL || 'http://172.16.20.130:8000';
+
+        await axios.post(`${frappeUrl}/api/method/ticket_service_integration.handle_ticket_event`, {
+          event_type: eventType,
+          event_data: eventData
+        }, {
+          headers: {
+            'Authorization': `token ${process.env.FRAPPE_API_KEY}:${process.env.FRAPPE_API_SECRET}`,
+            'Content-Type': 'application/json'
+          },
+          timeout: 5000
+        });
+
+        console.log(`✅ [Frappe Integration] Event sent via API: ${eventType}`);
+      } catch (apiError) {
+        console.warn(`⚠️ [Frappe Integration] API call failed, relying on Redis only:`, apiError.message);
+      }
+
+      console.log(`✅ [Frappe Integration] Event published: ${eventType}`);
+    } catch (error) {
+      console.error('❌ [Frappe Integration] Error sending event to Frappe:', error.message);
     }
   }
 
