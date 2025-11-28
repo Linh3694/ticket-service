@@ -1,7 +1,7 @@
 const jwt = require('jsonwebtoken');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'breakpoint';
-const SERVICE_USER_EMAIL = 'system@ticket-service.wellspring.edu.vn';
+const SERVICE_USER_EMAIL = 'system@local.auth';
 
 /**
  * Tạo JWT token cho service-to-service authentication
