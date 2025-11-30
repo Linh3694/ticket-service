@@ -1054,16 +1054,19 @@ class NotificationService {
         }
       };
 
-      // Import JWT helper
-      const { getServiceAuthHeaders } = require('../utils/jwtHelper');
-
       // Get Frappe API URL from environment
       const frappeApiUrl = process.env.FRAPPE_API_URL || 'http://172.16.20.130:8000';
       const ticketEndpoint = `${frappeApiUrl}/api/method/erp.api.notification.ticket.handle_ticket_event`;
 
-      // Send via HTTP API call with JWT authentication
+      // Send via HTTP API call WITHOUT auth (endpoint allows guest)
+      // This avoids Frappe core auth validation issues
       const response = await this.api.post(ticketEndpoint, frappeEvent, {
-        headers: getServiceAuthHeaders(),
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'X-Service-Name': 'ticket-service',
+          'X-Request-Source': 'service-to-service'
+        },
         timeout: 30000
       });
 
