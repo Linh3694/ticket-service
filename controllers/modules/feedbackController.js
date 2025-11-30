@@ -693,8 +693,11 @@ const getTechnicalStatsByUserId = async (req, res) => {
 const addFeedback = async (req, res) => {
   try {
     const { ticketId } = req.params;
-    const { rating, comment } = req.body;
+    const { rating, comment, badges } = req.body;
     const userId = req.user._id;
+    const userName = req.user.fullname || req.user.email;
+
+    console.log('📝 [addFeedback] Received:', { ticketId, rating, comment, badges });
 
     const ticket = await Ticket.findById(ticketId);
 
@@ -713,20 +716,49 @@ const addFeedback = async (req, res) => {
       });
     }
 
+    // Ensure badges is array
+    const badgesArray = Array.isArray(badges) ? badges : [];
+
     ticket.feedback = {
+      assignedTo: ticket.assignedTo,
       rating: rating,
-      comment: comment,
+      comment: comment?.trim() || '',
+      badges: badgesArray,
       createdAt: new Date()
     };
 
-    ticket.status = 'Done';
+    ticket.status = 'Closed';
     ticket.closedAt = new Date();
+
+    // Log feedback
+    ticket.history.push({
+      timestamp: new Date(),
+      action: TICKET_LOGS.FEEDBACK_ACCEPTED(userName, rating),
+      user: userId
+    });
 
     await ticket.save();
 
+    console.log('📝 [addFeedback] Saved feedback:', ticket.feedback);
+
+    // Send notification
+    try {
+      if (ticket.assignedTo) {
+        await notificationService.sendTicketFeedbackNotification(ticket, ticket.feedback);
+      }
+    } catch (notificationError) {
+      console.error('❌ Feedback notification error:', notificationError);
+    }
+
     res.json({
       success: true,
-      message: 'Feedback đã được gửi thành công'
+      message: 'Feedback đã được gửi thành công',
+      ticket: {
+        _id: ticket._id,
+        status: ticket.status,
+        feedback: ticket.feedback,
+        closedAt: ticket.closedAt
+      }
     });
 
   } catch (error) {
