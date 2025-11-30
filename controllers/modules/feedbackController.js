@@ -13,6 +13,9 @@ const acceptFeedback = async (req, res) => {
     const userId = req.user._id;
     const userName = req.user.fullname || req.user.email;
 
+    console.log('📝 [acceptFeedback] req.body:', JSON.stringify(req.body));
+    console.log('📝 [acceptFeedback] badges received:', badges, 'type:', typeof badges, 'isArray:', Array.isArray(badges));
+
     // Validation
     const ratingNum = parseInt(rating, 10);
     if (isNaN(ratingNum) || ratingNum < 1 || ratingNum > 5) {
@@ -47,14 +50,19 @@ const acceptFeedback = async (req, res) => {
       });
     }
 
-    // Create feedback object
+    // Create feedback object - ensure badges is array
+    const badgesArray = Array.isArray(badges) ? badges : [];
+    console.log('📝 [acceptFeedback] badgesArray to save:', badgesArray);
+    
     const feedback = {
       assignedTo: ticket.assignedTo,
       rating: ratingNum,
       comment: comment?.trim() || '',
-      badges: badges || [],
+      badges: badgesArray,
       createdAt: new Date()
     };
+
+    console.log('📝 [acceptFeedback] feedback object:', JSON.stringify(feedback));
 
     // Update ticket
     ticket.feedback = feedback;
@@ -69,6 +77,8 @@ const acceptFeedback = async (req, res) => {
     });
 
     await ticket.save();
+    
+    console.log('📝 [acceptFeedback] After save - ticket.feedback:', JSON.stringify(ticket.feedback));
 
     // 📱 Send push notification for ticket feedback
     try {
