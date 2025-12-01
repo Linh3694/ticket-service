@@ -264,7 +264,8 @@ const sendMessage = async (req, res) => {
       console.warn('⚠️ [WebSocket] Failed to broadcast message:', wsError.message);
     }
 
-    // 📱 Send push notification for user reply
+    // 📱 Send push notifications
+    // 1. If creator sent message, notify assignee
     if (isCreator && ticket.assignedTo) {
       try {
         await notificationService.sendUserReplyNotification(
@@ -273,7 +274,20 @@ const sendMessage = async (req, res) => {
         );
       } catch (notificationError) {
         console.error('❌ User reply notification failed:', notificationError.message);
-        // Continue with message sending even if notification fails
+      }
+    }
+
+    // 2. If status changed, send status change notification
+    if (statusChanged) {
+      try {
+        await notificationService.sendTicketStatusChangeNotification(
+          ticket,
+          oldStatus,
+          newStatus,
+          req.user._id
+        );
+      } catch (notificationError) {
+        console.error('❌ Status change notification failed:', notificationError.message);
       }
     }
 

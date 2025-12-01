@@ -64,6 +64,9 @@ const acceptFeedback = async (req, res) => {
 
     console.log('📝 [acceptFeedback] feedback object:', JSON.stringify(feedback));
 
+    // Save old status before changing
+    const oldStatus = ticket.status;
+
     // Update ticket
     ticket.feedback = feedback;
     ticket.status = 'Closed';
@@ -80,7 +83,8 @@ const acceptFeedback = async (req, res) => {
     
     console.log('📝 [acceptFeedback] After save - ticket.feedback:', JSON.stringify(ticket.feedback));
 
-    // 📱 Send push notification for ticket feedback
+    // 📱 Send push notifications
+    // 1. Send feedback notification to assignee
     try {
       if (ticket.assignedTo) {
         await notificationService.sendTicketFeedbackNotification(
@@ -90,7 +94,18 @@ const acceptFeedback = async (req, res) => {
       }
     } catch (notificationError) {
       console.error('❌ Feedback notification error:', notificationError);
-      // Don't fail the request if notification fails
+    }
+
+    // 2. Send status change notification (ticket closed) - notify creator
+    try {
+      await notificationService.sendTicketStatusChangeNotification(
+        ticket,
+        oldStatus,
+        'Closed',
+        req.user._id
+      );
+    } catch (notificationError) {
+      console.error('❌ Status change notification error:', notificationError);
     }
 
     res.json({

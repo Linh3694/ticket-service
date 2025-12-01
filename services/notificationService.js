@@ -224,7 +224,7 @@ class NotificationService {
         return;
       }
 
-      const title = '🎫 Ticket mới';
+      const title = 'Ticket mới';
       const body = `Ticket mới #${ticket.ticketNumber || ticket.ticketCode}: ${ticket.title}`;
 
       // Gửi trực tiếp push notifications cho từng recipient
@@ -371,37 +371,37 @@ class NotificationService {
   getTicketStatusNotificationConfig(status) {
     const statusConfigs = {
       'Assigned': {
-        title: '🎫 Ticket đã được gán',
+        title: 'Ticket đã được gán',
         body: 'Ticket #{ticketCode} đã được gán cho bạn: {title}',
         priority: 'high',
         action: 'ticket_assigned'
       },
       'Processing': {
-        title: '⚡ Ticket đang xử lý',
+        title: 'Ticket đang xử lý',
         body: 'Ticket #{ticketCode} đang được xử lý: {title}',
         priority: 'normal',
         action: 'ticket_processing'
       },
       'Waiting for Customer': {
-        title: '⏳ Chờ phản hồi khách hàng',
+        title: 'Chờ phản hồi khách hàng',
         body: 'Ticket #{ticketCode} đang chờ phản hồi của bạn: {title}',
         priority: 'normal',
         action: 'ticket_waiting'
       },
       'Done': {
-        title: '✅ Ticket đã hoàn thành',
+        title: 'Ticket đã hoàn thành',
         body: 'Ticket #{ticketCode} đã được giải quyết: {title}',
         priority: 'normal',
         action: 'ticket_done'
       },
       'Closed': {
-        title: '🔒 Ticket đã đóng',
+        title: 'Ticket đã đóng',
         body: 'Ticket #{ticketCode} đã được đóng: {title}',
         priority: 'low',
         action: 'ticket_closed'
       },
       'Cancelled': {
-        title: '❌ Ticket đã hủy',
+        title: 'Ticket đã hủy',
         body: 'Ticket #{ticketCode} đã bị hủy: {title}',
         priority: 'low',
         action: 'ticket_cancelled'
@@ -489,7 +489,7 @@ class NotificationService {
     try {
       console.log(`👤 [Ticket Service] Sending assignment notification for ticket ${ticket.ticketCode}`);
 
-      const title = '👤 Ticket được gán';
+      const title = 'Ticket được gán';
       const body = `Ticket #${ticket.ticketCode || ticket.ticketNumber} đã được gán cho bạn: ${ticket.title || 'No title'}`;
 
       await this.sendNotificationToUser(assignedTo._id || assignedTo, title, body, {
@@ -547,7 +547,7 @@ class NotificationService {
         assignedTo: ticket.assignedTo,
         recipients: supportTeamRecipients,
         notification: {
-          title: '🎫 Ticket mới',
+          title: 'Ticket mới',
           body: `Ticket mới #${ticket.ticketCode || ticket.ticketNumber}: ${ticket.title || 'No title'} (${ticket.category})`,
           action: 'new_ticket_admin',
           data: {
@@ -601,7 +601,7 @@ class NotificationService {
         messageSender: messageSender._id || messageSender,
         recipients: recipients,
         notification: {
-          title: '💬 Người dùng đã phản hồi',
+          title: 'Người dùng đã phản hồi',
           body: `Ticket #${ticket.ticketCode || ticket.ticketNumber} có phản hồi mới: ${ticket.title || 'No title'}`,
           action: 'user_reply',
           data: {
@@ -654,7 +654,7 @@ class NotificationService {
         cancellationReason: ticket.cancellationReason,
         recipients: recipients,
         notification: {
-          title: '❌ Ticket đã bị hủy',
+          title: 'Ticket đã bị hủy',
           body: `Ticket #${ticket.ticketCode || ticket.ticketNumber} đã bị hủy: ${ticket.title || 'No title'}`,
           action: 'ticket_cancelled_admin',
           data: {
@@ -709,7 +709,7 @@ class NotificationService {
         confirmedBy: confirmedBy._id || confirmedBy,
         recipients: recipients,
         notification: {
-          title: '✅ Ticket đã được xác nhận hoàn thành',
+          title: 'Ticket đã được xác nhận hoàn thành',
           body: `Ticket #${ticket.ticketCode || ticket.ticketNumber} đã được xác nhận hoàn thành: ${ticket.title || 'No title'}`,
           action: 'completion_confirmed',
           data: {
@@ -763,7 +763,7 @@ class NotificationService {
         feedbackComment: feedbackData.comment,
         recipients: recipients,
         notification: {
-          title: '⭐ Ticket nhận được đánh giá',
+          title: 'Ticket nhận được đánh giá',
           body: `Ticket #${ticket.ticketCode || ticket.ticketNumber} nhận được ${feedbackData.rating} sao: ${ticket.title || 'No title'}`,
           action: 'ticket_feedback_received',
           data: {

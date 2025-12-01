@@ -1262,10 +1262,11 @@ const assignTicketToMe = async (req, res) => {
     await ticket.save();
     console.log(`💾 [assignTicketToMe] After save: ticket.assignedTo=${ticket.assignedTo}`);
 
-    // 📱 Send push notification for ticket assignment
+    // 📱 Send push notification for ticket assignment and status change
     if (oldStatus !== 'Processing') {
-      console.log(`📱 [assignTicketToMe] Sending assignment notification`);
+      console.log(`📱 [assignTicketToMe] Sending notifications for assignment and status change`);
 
+      // 1. Send assignment notification to assignee
       try {
         await notificationService.sendTicketAssignmentNotification(
           ticket,
@@ -1274,7 +1275,18 @@ const assignTicketToMe = async (req, res) => {
         );
       } catch (notificationError) {
         console.error('❌ [assignTicketToMe] Assignment notification failed:', notificationError.message);
-        // Continue with ticket assignment even if notification fails
+      }
+
+      // 2. Send status change notification to creator (ticket is now being processed)
+      try {
+        await notificationService.sendTicketStatusChangeNotification(
+          ticket,
+          oldStatus,
+          'Processing',
+          req.user._id
+        );
+      } catch (notificationError) {
+        console.error('❌ [assignTicketToMe] Status change notification failed:', notificationError.message);
       }
     }
 
