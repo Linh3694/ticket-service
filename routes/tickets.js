@@ -2,7 +2,7 @@ const express = require("express");
 const router = express.Router();
 const ticketController = require("../controllers/ticketController");
 const { authenticate } = require("../middleware/authMiddleware");
-const { upload, handleUploadError } = require("../middleware/uploadTicket");
+const { upload, handleUploadError, compressFilesMiddleware } = require("../middleware/uploadTicket");
 
 // Ticket routes
 // ⚠️ IMPORTANT: Order matters! More specific routes BEFORE dynamic ones (:ticketId)
@@ -19,7 +19,7 @@ internalRouter.get("/debug-email-status/:ticketId", ticketController.debugTicket
 router.use("/internal", internalRouter);
 
 // Regular routes with authentication
-router.post("/", authenticate, upload.array("attachments", 15), handleUploadError, ticketController.createTicket);
+router.post("/", authenticate, upload.array("attachments", 15), handleUploadError, compressFilesMiddleware, ticketController.createTicket);
 router.get("/categories", ticketController.getTicketCategories);
 router.get("/debug/team-members", authenticate, ticketController.debugTeamMembers);
 router.get("/technical-stats/:userId", ticketController.getTechnicalStatsByUserId);
@@ -37,11 +37,11 @@ router.get("/feedback-stats/:email", ticketController.getTeamMemberFeedbackStats
 // Dynamic routes with :ticketId (MUST be last!)
 router.get("/:ticketId", authenticate, ticketController.getTicketById);
 router.get("/:ticketId/history", authenticate, ticketController.getTicketHistory);
-router.put("/:ticketId", authenticate, upload.array("attachments", 15), ticketController.updateTicket);
+router.put("/:ticketId", authenticate, upload.array("attachments", 15), handleUploadError, compressFilesMiddleware, ticketController.updateTicket);
 router.delete("/:ticketId", authenticate, ticketController.deleteTicket);
 router.post("/:ticketId/feedback", authenticate, ticketController.addFeedback);
 router.post("/:ticketId/escalate", authenticate, ticketController.escalateTicket);
-router.post("/:ticketId/messages", authenticate, upload.array("files", 15), handleUploadError, ticketController.sendMessage);
+router.post("/:ticketId/messages", authenticate, upload.array("files", 15), handleUploadError, compressFilesMiddleware, ticketController.sendMessage);
 router.get("/:ticketId/messages", authenticate, ticketController.getTicketMessages);
 router.post("/:ticketId/subtasks", authenticate, ticketController.addSubTask);
 router.get("/:ticketId/subtasks", authenticate, ticketController.getSubTasksByTicket);

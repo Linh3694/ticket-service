@@ -2,6 +2,7 @@ const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
 const { fileFilter } = require("./fileFilter");
+const { compressFilesMiddleware } = require("./compressFiles");
 
 // Định nghĩa đường dẫn thư mục upload
 const uploadDir = "uploads/Tickets";
@@ -21,11 +22,12 @@ const storage = multer.diskStorage({
   },
 });
 
-// Cấu hình upload: tối đa 15 file, mỗi file 10MB (như config.env.example)
+// Cấu hình upload: tối đa 15 file, mỗi file 50MB trước khi nén (như config.env.example)
+// File sẽ được nén sau khi upload nên cho phép upload file lớn hơn
 const upload = multer({
   storage,
   limits: {
-    fileSize: parseInt(process.env.MAX_FILE_SIZE) || 10 * 1024 * 1024, // 10MB default
+    fileSize: parseInt(process.env.MAX_FILE_SIZE) || 50 * 1024 * 1024, // 50MB default (sẽ nén sau)
     files: 15 // Max 15 files
   },
   fileFilter: (req, file, cb) => {
@@ -40,7 +42,7 @@ const handleUploadError = (error, req, res, next) => {
     if (error.code === 'LIMIT_FILE_SIZE') {
       return res.status(400).json({
         success: false,
-        message: `File quá lớn. Kích thước tối đa: ${process.env.MAX_FILE_SIZE || '10MB'}`
+        message: `File quá lớn. Kích thước tối đa: ${process.env.MAX_FILE_SIZE || '50MB'}`
       });
     }
     if (error.code === 'LIMIT_FILE_COUNT') {
@@ -61,4 +63,4 @@ const handleUploadError = (error, req, res, next) => {
   next(error);
 };
 
-module.exports = { upload, handleUploadError };
+module.exports = { upload, handleUploadError, compressFilesMiddleware };
