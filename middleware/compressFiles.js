@@ -187,14 +187,26 @@ const compressVideo = async (filePath) => {
  * Middleware để nén files sau khi upload
  */
 const compressFilesMiddleware = async (req, res, next) => {
-  if (!req.files || req.files.length === 0) {
+  // Xử lý các trường hợp req.files khác nhau
+  if (!req.files) {
+    return next();
+  }
+
+  // Nếu req.files là object (từ upload.fields()), convert sang array
+  let filesArray = req.files;
+  if (!Array.isArray(req.files)) {
+    // req.files có thể là object như { files: [...], attachments: [...] }
+    filesArray = Object.values(req.files).flat();
+  }
+
+  if (!filesArray || filesArray.length === 0) {
     return next();
   }
 
   const compressionResults = [];
 
-  for (let i = 0; i < req.files.length; i++) {
-    const file = req.files[i];
+  for (let i = 0; i < filesArray.length; i++) {
+    const file = filesArray[i];
     const filePath = file.path;
     const mimeType = file.mimetype || '';
 

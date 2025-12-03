@@ -121,7 +121,8 @@ const sendMessage = async (req, res) => {
     ticket.messages.push(message);
 
     // Log message in history
-    const messagePreview = text.length > 50 ? text.substring(0, 50) + '...' : text;
+    const textContent = text || '';
+    const messagePreview = textContent.length > 50 ? textContent.substring(0, 50) + '...' : (textContent || '[Media]');
     ticket.history.push({
       timestamp: new Date(),
       action: TICKET_LOGS.MESSAGE_SENT(userName, messagePreview),
