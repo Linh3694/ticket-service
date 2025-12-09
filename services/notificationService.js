@@ -525,9 +525,15 @@ class NotificationService {
   async sendNewTicketToSupportTeamNotification(ticket) {
     try {
       console.log(`🆕 [Ticket Service] Processing new ticket event for support team: ${ticket.ticketCode}`);
+      console.log(`🆕 [Ticket Service] Ticket category: ${ticket.category}`);
 
       // Lấy tất cả support team members
       const supportTeamRecipients = await this.getSupportTeamRecipients(ticket.category);
+
+      console.log(`🆕 [Ticket Service] Found ${supportTeamRecipients.length} support team recipients`);
+      if (supportTeamRecipients.length > 0) {
+        console.log(`🆕 [Ticket Service] Recipients emails: ${JSON.stringify(supportTeamRecipients)}`);
+      }
 
       if (supportTeamRecipients.length === 0) {
         console.log(`⚠️ [Ticket Service] No support team members found for category: ${ticket.category}`);
@@ -801,10 +807,14 @@ class NotificationService {
       const SupportTeamMember = require('../models/SupportTeamMember');
 
       // Tìm support team members có role phù hợp với category
+      // IMPORTANT: Roles must match SUPPORT_ROLES in SupportTeamMember model:
+      // 'Overall', 'Account', 'Camera System', 'Network System', 'Bell System', 'Software', 'Email Ticket'
       const categoryRoleMap = {
         'Software': ['Software', 'Overall'],
-        'Camera': ['Camera', 'Overall'],
+        'Camera': ['Camera System', 'Overall'],
+        'Camera System': ['Camera System', 'Overall'],
         'Network': ['Network System', 'Overall'],
+        'Network System': ['Network System', 'Overall'],
         'Bell System': ['Bell System', 'Overall'],
         'Account': ['Account', 'Overall'],
         'Email Ticket': ['Email Ticket', 'Overall'],
@@ -812,15 +822,25 @@ class NotificationService {
       };
 
       const roles = categoryRoleMap[category] || ['Overall'];
+      console.log(`📋 [getSupportTeamRecipients] Category: ${category}, Roles to search: ${JSON.stringify(roles)}`);
 
       const supportMembers = await SupportTeamMember.find({
         isActive: true,
         roles: { $in: roles }
       }).populate('userId', 'email').lean();
 
+      console.log(`📋 [getSupportTeamRecipients] Found ${supportMembers.length} support members in DB`);
+      
+      // Debug log for each member
+      supportMembers.forEach((member, index) => {
+        console.log(`📋 [getSupportTeamRecipients] Member ${index + 1}: email=${member.email}, userId=${member.userId ? JSON.stringify(member.userId) : 'null'}, roles=${JSON.stringify(member.roles)}`);
+      });
+
       const emails = supportMembers
-        .map(member => member.userId?.email)
+        .map(member => member.userId?.email || member.email)
         .filter(email => email != null);
+
+      console.log(`📋 [getSupportTeamRecipients] Extracted ${emails.length} emails: ${JSON.stringify(emails)}`);
 
       return [...new Set(emails)]; // Remove duplicates
     } catch (error) {
