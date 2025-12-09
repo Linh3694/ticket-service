@@ -527,16 +527,16 @@ class NotificationService {
       console.log(`🆕 [Ticket Service] Processing new ticket event for support team: ${ticket.ticketCode}`);
       console.log(`🆕 [Ticket Service] Ticket category: ${ticket.category}`);
 
-      // Lấy tất cả support team members
-      const supportTeamRecipients = await this.getSupportTeamRecipients(ticket.category);
+      // Lấy TẤT CẢ support team members (không filter theo category)
+      const supportTeamRecipients = await this.getAllSupportTeamRecipients();
 
-      console.log(`🆕 [Ticket Service] Found ${supportTeamRecipients.length} support team recipients`);
+      console.log(`🆕 [Ticket Service] Found ${supportTeamRecipients.length} support team recipients (all members)`);
       if (supportTeamRecipients.length > 0) {
         console.log(`🆕 [Ticket Service] Recipients emails: ${JSON.stringify(supportTeamRecipients)}`);
       }
 
       if (supportTeamRecipients.length === 0) {
-        console.log(`⚠️ [Ticket Service] No support team members found for category: ${ticket.category}`);
+        console.log(`⚠️ [Ticket Service] No support team members found`);
         return;
       }
 
@@ -800,7 +800,38 @@ class NotificationService {
     }
   }
 
-  // Helper: Lấy danh sách support team members cho một category
+  // Helper: Lấy TẤT CẢ support team members (dùng cho new ticket notification)
+  async getAllSupportTeamRecipients() {
+    try {
+      const SupportTeamMember = require('../models/SupportTeamMember');
+
+      console.log(`📋 [getAllSupportTeamRecipients] Getting ALL active support team members`);
+
+      const supportMembers = await SupportTeamMember.find({
+        isActive: true
+      }).populate('userId', 'email').lean();
+
+      console.log(`📋 [getAllSupportTeamRecipients] Found ${supportMembers.length} support members in DB`);
+      
+      // Debug log for each member
+      supportMembers.forEach((member, index) => {
+        console.log(`📋 [getAllSupportTeamRecipients] Member ${index + 1}: email=${member.email}, roles=${JSON.stringify(member.roles)}`);
+      });
+
+      const emails = supportMembers
+        .map(member => member.userId?.email || member.email)
+        .filter(email => email != null);
+
+      console.log(`📋 [getAllSupportTeamRecipients] Extracted ${emails.length} emails: ${JSON.stringify(emails)}`);
+
+      return [...new Set(emails)]; // Remove duplicates
+    } catch (error) {
+      console.error('❌ [Ticket Service] Error getting all support team recipients:', error);
+      return [];
+    }
+  }
+
+  // Helper: Lấy danh sách support team members cho một category (dùng cho các notification khác)
   async getSupportTeamRecipients(category) {
     try {
       // Import models dynamically to avoid circular dependencies
