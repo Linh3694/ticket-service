@@ -807,9 +807,10 @@ class NotificationService {
 
       console.log(`📋 [getAllSupportTeamRecipients] Getting ALL active support team members`);
 
+      // Không dùng populate vì một số userId có thể là email string thay vì ObjectId
       const supportMembers = await SupportTeamMember.find({
         isActive: true
-      }).populate('userId', 'email').lean();
+      }).lean();
 
       console.log(`📋 [getAllSupportTeamRecipients] Found ${supportMembers.length} support members in DB`);
       
@@ -818,9 +819,10 @@ class NotificationService {
         console.log(`📋 [getAllSupportTeamRecipients] Member ${index + 1}: email=${member.email}, roles=${JSON.stringify(member.roles)}`);
       });
 
+      // Lấy trực tiếp từ member.email (field bắt buộc trong SupportTeamMember schema)
       const emails = supportMembers
-        .map(member => member.userId?.email || member.email)
-        .filter(email => email != null);
+        .map(member => member.email)
+        .filter(email => email != null && email.trim() !== '');
 
       console.log(`📋 [getAllSupportTeamRecipients] Extracted ${emails.length} emails: ${JSON.stringify(emails)}`);
 
@@ -855,21 +857,23 @@ class NotificationService {
       const roles = categoryRoleMap[category] || ['Overall'];
       console.log(`📋 [getSupportTeamRecipients] Category: ${category}, Roles to search: ${JSON.stringify(roles)}`);
 
+      // Không dùng populate vì một số userId có thể là email string thay vì ObjectId
       const supportMembers = await SupportTeamMember.find({
         isActive: true,
         roles: { $in: roles }
-      }).populate('userId', 'email').lean();
+      }).lean();
 
       console.log(`📋 [getSupportTeamRecipients] Found ${supportMembers.length} support members in DB`);
       
       // Debug log for each member
       supportMembers.forEach((member, index) => {
-        console.log(`📋 [getSupportTeamRecipients] Member ${index + 1}: email=${member.email}, userId=${member.userId ? JSON.stringify(member.userId) : 'null'}, roles=${JSON.stringify(member.roles)}`);
+        console.log(`📋 [getSupportTeamRecipients] Member ${index + 1}: email=${member.email}, roles=${JSON.stringify(member.roles)}`);
       });
 
+      // Lấy trực tiếp từ member.email
       const emails = supportMembers
-        .map(member => member.userId?.email || member.email)
-        .filter(email => email != null);
+        .map(member => member.email)
+        .filter(email => email != null && email.trim() !== '');
 
       console.log(`📋 [getSupportTeamRecipients] Extracted ${emails.length} emails: ${JSON.stringify(emails)}`);
 
