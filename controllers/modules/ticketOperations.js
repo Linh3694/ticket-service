@@ -143,6 +143,7 @@ const createTicketFromEmail = async (req, res) => {
       title: subject,  // Email service sends 'title', but we use 'subject'
       description: plainContent,  // Email service sends 'description', but we use 'plainContent'
       creatorId,
+      creatorEmail, // Fallback: email của người tạo (nếu không có creatorId)
       files: attachments,  // Email service sends 'files', but we use 'attachments'
       priority = 'Medium'
     } = req.body;
@@ -156,16 +157,97 @@ const createTicketFromEmail = async (req, res) => {
       });
     }
 
+    // Kiểm tra trùng lặp emailId để tránh tạo duplicate tickets
+    if (emailId) {
+      console.log(`[createTicketFromEmail] 🔍 Checking for duplicate emailId: ${emailId}`);
+      const existingTicket = await Ticket.findOne({ emailId: emailId })
+        .populate('creator', 'fullname email avatarUrl jobTitle department');
+      
+      if (existingTicket) {
+        console.log(`[createTicketFromEmail] ⚠️ Duplicate email detected! Email ${emailId} already exists as ticket ${existingTicket.ticketCode}`);
+        return res.status(200).json({
+          success: true,
+          ticket: existingTicket,
+          message: `Email already processed as ticket ${existingTicket.ticketCode}`,
+          isDuplicate: true
+        });
+      }
+      console.log('[createTicketFromEmail] ✅ No duplicate found, proceeding with ticket creation');
+    }
+
     // Import helper functions
     const { generateTicketCode } = require('../../utils/ticketHelper');
     const { TICKET_LOGS } = require('../../utils/logFormatter');
 
-    // Creator is required for email tickets
-    if (!creatorId) {
-      console.log('[createTicketFromEmail] ❌ No creator ID provided');
+    // Xử lý creator: creatorId hoặc tự động tìm/tạo từ creatorEmail
+    let finalCreatorId = creatorId;
+
+    if (!finalCreatorId && creatorEmail) {
+      console.log(`[createTicketFromEmail] 🔄 No creatorId provided, looking up user by email: ${creatorEmail}`);
+      
+      try {
+        // Tìm user theo email
+        let creator = await User.findOne({ email: creatorEmail.toLowerCase() });
+        
+        if (!creator) {
+          // Tự động tạo user nếu không tồn tại
+          console.log(`[createTicketFromEmail] 🔄 User not found, auto-creating for email: ${creatorEmail}`);
+          
+          // Helper function để tạo fullname từ email
+          const generateFullname = (email) => {
+            const prefix = email.split('@')[0];
+            const groupEmailMap = {
+              'hr': 'HR Department', 'info': 'Information', 'support': 'Support Team',
+              'admin': 'Administration', 'it': 'IT Department', 'finance': 'Finance Department',
+              'admissions': 'Admissions Office', 'academic': 'Academic Department'
+            };
+            return groupEmailMap[prefix.toLowerCase()] || 
+                   prefix.split(/[._-]/).map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+          };
+
+          creator = new User({
+            email: creatorEmail.toLowerCase(),
+            fullname: generateFullname(creatorEmail),
+            role: 'user',
+            provider: 'email',
+            active: true,
+            disabled: false,
+            roles: [],
+            frappeUserId: null,
+            employeeCode: null,
+            jobTitle: 'External User',
+            department: '',
+            avatarUrl: '',
+            microsoftId: null
+          });
+          
+          await creator.save();
+          console.log(`[createTicketFromEmail] ✅ Auto-created user: ${creator._id}`);
+        }
+        
+        finalCreatorId = creator._id;
+        console.log(`[createTicketFromEmail] ✅ Using creator: ${finalCreatorId}`);
+        
+      } catch (userError) {
+        console.error(`[createTicketFromEmail] ❌ Error finding/creating user:`, userError);
+        
+        // Nếu lỗi duplicate key, thử tìm lại
+        if (userError.code === 11000) {
+          const creator = await User.findOne({ email: creatorEmail.toLowerCase() });
+          if (creator) {
+            finalCreatorId = creator._id;
+            console.log(`[createTicketFromEmail] ✅ Found user after retry: ${finalCreatorId}`);
+          }
+        }
+      }
+    }
+
+    // Validate: phải có creator (từ creatorId hoặc creatorEmail)
+    if (!finalCreatorId) {
+      console.log('[createTicketFromEmail] ❌ No creator ID or email provided');
       return res.status(400).json({
         success: false,
-        message: 'Creator ID is required'
+        message: 'Creator ID or creator email is required'
       });
     }
 
@@ -173,14 +255,7 @@ const createTicketFromEmail = async (req, res) => {
     const ticketCode = await generateTicketCode('Email Ticket');
     console.log(`[createTicketFromEmail] ✅ Generated ticket code: ${ticketCode}`);
 
-    // Ensure we have a valid creator
-    if (!creatorId) {
-      console.log('[createTicketFromEmail] ⚠️ No creator ID provided, cannot create ticket');
-      return res.status(400).json({
-        success: false,
-        message: 'Creator ID is required'
-      });
-    }
+    console.log(`[createTicketFromEmail] 🎫 Creating ticket with creator: ${finalCreatorId}`);
 
     console.log('[createTicketFromEmail] 🎫 Creating ticket object...');
 
@@ -292,7 +367,7 @@ const createTicketFromEmail = async (req, res) => {
       category: 'Email Ticket',
       status: 'Assigned', // Use valid enum value instead of 'New'
       priority: priority,
-      creator: creatorId,
+      creator: finalCreatorId, // Sử dụng finalCreatorId đã được xử lý
       assignedTo: assignedTo, // Auto-assigned support member
       source: 'email',
       emailId: emailId,

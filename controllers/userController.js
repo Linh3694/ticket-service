@@ -640,6 +640,40 @@ exports.webhookUserChanged = async (req, res) => {
 };
 
 // Get user by email (for email service)
+// Helper function để tạo fullname từ email (cho group emails)
+function generateFullnameFromEmail(email) {
+  const prefix = email.split('@')[0];
+  
+  // Map common group email prefixes to readable names
+  const groupEmailMap = {
+    'hr': 'HR Department',
+    'info': 'Information',
+    'support': 'Support Team',
+    'admin': 'Administration',
+    'it': 'IT Department',
+    'finance': 'Finance Department',
+    'admissions': 'Admissions Office',
+    'academic': 'Academic Department',
+    'operations': 'Operations',
+    'marketing': 'Marketing',
+    'sales': 'Sales',
+    'noreply': 'No Reply',
+    'no-reply': 'No Reply'
+  };
+
+  // Kiểm tra nếu prefix match với group email
+  const lowerPrefix = prefix.toLowerCase();
+  if (groupEmailMap[lowerPrefix]) {
+    return groupEmailMap[lowerPrefix];
+  }
+
+  // Capitalize first letter of each word (for emails like john.doe -> John Doe)
+  return prefix
+    .split(/[._-]/)
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ');
+}
+
 const getUserByEmail = async (req, res) => {
   try {
     const { email } = req.params;
@@ -655,7 +689,7 @@ const getUserByEmail = async (req, res) => {
     }
 
     // Find user by email
-    const user = await User.findOne({ email: email.toLowerCase() });
+    let user = await User.findOne({ email: email.toLowerCase() });
 
     if (user) {
       console.log(`[getUserByEmail] ✅ Found user: ${user._id} (${user.fullname || user.email})`);
@@ -665,11 +699,64 @@ const getUserByEmail = async (req, res) => {
         message: 'User found'
       });
     } else {
-      console.log(`[getUserByEmail] ❌ User not found for email: ${email}`);
-      return res.status(404).json({
-        success: false,
-        message: 'User not found'
-      });
+      console.log(`[getUserByEmail] ⚠️ User not found for email: ${email}`);
+      
+      // Tự động tạo user cho group emails hoặc emails không tồn tại
+      // Điều này cho phép tạo tickets từ bất kỳ email nào
+      console.log(`[getUserByEmail] 🔄 Auto-creating user for email: ${email}`);
+      
+      try {
+        const fullname = generateFullnameFromEmail(email);
+        
+        const newUser = new User({
+          email: email.toLowerCase(),
+          fullname: fullname,
+          role: 'user',
+          provider: 'email',
+          active: true,
+          disabled: false,
+          roles: [],
+          frappeUserId: null,
+          employeeCode: null,
+          jobTitle: 'External User',
+          department: '',
+          avatarUrl: '',
+          microsoftId: null
+        });
+
+        await newUser.save();
+        console.log(`[getUserByEmail] ✅ Auto-created user: ${newUser._id} (${fullname})`);
+
+        return res.status(200).json({
+          success: true,
+          user: newUser,
+          message: 'User auto-created',
+          isNewUser: true
+        });
+
+      } catch (createError) {
+        console.error(`[getUserByEmail] ❌ Error auto-creating user:`, createError);
+        
+        // Nếu lỗi duplicate key (race condition), thử tìm lại user
+        if (createError.code === 11000) {
+          console.log(`[getUserByEmail] 🔄 Duplicate key error, retrying findOne...`);
+          user = await User.findOne({ email: email.toLowerCase() });
+          if (user) {
+            return res.status(200).json({
+              success: true,
+              user: user,
+              message: 'User found after retry'
+            });
+          }
+        }
+
+        // Nếu vẫn lỗi, trả về 404
+        return res.status(404).json({
+          success: false,
+          message: 'User not found and could not be created',
+          error: createError.message
+        });
+      }
     }
 
   } catch (error) {

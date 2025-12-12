@@ -42,6 +42,11 @@ const ticketSchema = new mongoose.Schema(
       },
       creator: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
       assignedTo: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: false }, // Nhân viên hỗ trợ (từ User collection)
+      source: { 
+        type: String, 
+        enum: ["web", "email", "mobile", "api"], 
+        default: "web" 
+      }, // Nguồn tạo ticket
      
       // 📝 Timeline tracking
       createdAt: { type: Date, default: Date.now },
@@ -50,6 +55,11 @@ const ticketSchema = new mongoose.Schema(
       closedAt: { type: Date }, // Thời điểm đóng ticket
 
       // Email thread tracking
+      emailId: { 
+        type: String, 
+        sparse: true, // Cho phép null, nhưng unique nếu có giá trị
+        unique: true // Đảm bảo không trùng lặp emailId từ email service
+      }, // ID của email gốc từ email service (để tránh duplicate tickets)
       emailMessageId: { type: String }, // Message-ID của email tạo ticket gốc
       waitingForCustomerEmailSent: { type: Boolean, default: false }, // Track đã gửi mail cho trạng thái "Waiting for Customer"
 
