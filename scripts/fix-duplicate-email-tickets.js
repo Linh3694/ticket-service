@@ -1,4 +1,4 @@
-require('dotenv').config();
+require('dotenv').config({ path: require('path').join(__dirname, '../config.env') });
 const mongoose = require('mongoose');
 const Ticket = require('../models/Ticket');
 
@@ -9,7 +9,16 @@ const Ticket = require('../models/Ticket');
 async function fixDuplicateEmailTickets() {
   try {
     console.log('🔄 Connecting to MongoDB...');
-    await mongoose.connect(process.env.MONGO_URI);
+    const mongoUri = process.env.MONGODB_URI || process.env.MONGO_URI;
+    
+    if (!mongoUri) {
+      console.error('❌ MONGODB_URI not found in environment variables');
+      console.log('Available env vars:', Object.keys(process.env).filter(k => k.includes('MONGO')));
+      process.exit(1);
+    }
+    
+    console.log(`   Using MongoDB URI: ${mongoUri.replace(/\/\/.*@/, '//*****@')}`);
+    await mongoose.connect(mongoUri);
     console.log('✅ Connected to MongoDB');
 
     // Tìm tất cả duplicate emailId
