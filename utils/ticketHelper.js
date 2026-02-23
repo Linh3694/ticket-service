@@ -46,34 +46,50 @@ const CATEGORY_TO_ROLE = {
 /**
  * Generate ticket code dựa trên category
  * Ví dụ: OVR-0001, CAM-0002, etc.
+ * Có cơ chế retry để xử lý race condition khi nhiều instance chạy đồng thời.
  */
 async function generateTicketCode(category) {
-  try {
-    const prefix = CATEGORY_PREFIXES[category];
-    if (!prefix) {
-      throw new Error(`Invalid category: ${category}`);
-    }
-
-    // Lấy ticket cuối cùng với prefix này
-    const lastTicket = await Ticket.findOne({
-      ticketCode: { $regex: `^${prefix}-` }
-    }).sort({ createdAt: -1 });
-
-    let nextNumber = 1;
-    if (lastTicket && lastTicket.ticketCode) {
-      const match = lastTicket.ticketCode.match(/(\d+)$/);
-      if (match) {
-        nextNumber = parseInt(match[1]) + 1;
-      }
-    }
-
-    const ticketCode = `${prefix}-${String(nextNumber).padStart(4, '0')}`;
-    console.log(`✅ Generated ticket code: ${ticketCode}`);
-    return ticketCode;
-  } catch (error) {
-    console.error('❌ Error generating ticket code:', error.message);
-    throw error;
+  const prefix = CATEGORY_PREFIXES[category];
+  if (!prefix) {
+    throw new Error(`Invalid category: ${category}`);
   }
+
+  const MAX_RETRIES = 5;
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      // Sắp xếp theo số trong ticketCode (không dùng createdAt vì có thể bị race condition)
+      const allTicketsWithPrefix = await Ticket.find({
+        ticketCode: { $regex: `^${prefix}-\\d+$` }
+      }).select('ticketCode').lean();
+
+      let maxNumber = 0;
+      for (const t of allTicketsWithPrefix) {
+        const match = t.ticketCode.match(/(\d+)$/);
+        if (match) {
+          const num = parseInt(match[1]);
+          if (num > maxNumber) maxNumber = num;
+        }
+      }
+
+      const nextNumber = maxNumber + 1;
+      const ticketCode = `${prefix}-${String(nextNumber).padStart(4, '0')}`;
+
+      // Kiểm tra xem code này đã tồn tại chưa (double-check để chắc chắn)
+      const exists = await Ticket.findOne({ ticketCode }).lean();
+      if (exists) {
+        console.warn(`⚠️  [generateTicketCode] Attempt ${attempt}: ${ticketCode} already exists, retrying...`);
+        continue;
+      }
+
+      console.log(`✅ Generated ticket code: ${ticketCode} (attempt ${attempt})`);
+      return ticketCode;
+    } catch (error) {
+      console.error(`❌ [generateTicketCode] Attempt ${attempt} error:`, error.message);
+      if (attempt === MAX_RETRIES) throw error;
+    }
+  }
+
+  throw new Error(`[generateTicketCode] Could not generate unique ticket code for ${category} after ${MAX_RETRIES} attempts`);
 }
 
 /**

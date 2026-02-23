@@ -713,20 +713,22 @@ const createTicket = async (req, res) => {
     console.log(`🔧 [createTicket] After save():`);
     console.log(`   newTicket.assignedTo: ${newTicket.assignedTo}`);
 
-    // 4️⃣ Log history
+    // 4️⃣ Log history (bọc trong try-catch để lỗi history không làm hỏng response)
     const creatorName = req.user.fullname || req.user.email;
     console.log(`📝 [createTicket] Creator name: "${creatorName}"`);
 
-    // Log ticket creation
-    await logTicketHistory(newTicket._id, TICKET_LOGS.TICKET_CREATED(creatorName), userId);
+    try {
+      await logTicketHistory(newTicket._id, TICKET_LOGS.TICKET_CREATED(creatorName), userId);
 
-    // Log assignment if assigned
-    if (assignedToId) {
-      const assignedUser = await User.findById(assignedToId);
-      if (assignedUser) {
-        const assignedName = assignedUser.fullname || assignedUser.email;
-        await logTicketHistory(newTicket._id, TICKET_LOGS.AUTO_ASSIGNED(assignedName), userId);
+      if (assignedToId) {
+        const assignedUser = await User.findById(assignedToId);
+        if (assignedUser) {
+          const assignedName = assignedUser.fullname || assignedUser.email;
+          await logTicketHistory(newTicket._id, TICKET_LOGS.AUTO_ASSIGNED(assignedName), userId);
+        }
       }
+    } catch (historyError) {
+      console.warn('⚠️  [createTicket] Failed to log ticket history (non-critical):', historyError.message);
     }
 
     // 5️⃣ Send notifications to support team for new ticket
@@ -788,6 +790,18 @@ const createTicket = async (req, res) => {
 
   } catch (error) {
     console.error('❌ [createTicket] Error:', error);
+
+    // Xử lý lỗi duplicate key cho ticketCode (race condition giữa các instance)
+    if (error.code === 11000 && error.keyPattern?.ticketCode) {
+      console.warn('⚠️  [createTicket] Duplicate ticketCode detected (race condition), please retry');
+      return res.status(409).json({
+        success: false,
+        message: 'Mã ticket bị trùng do xung đột đồng thời. Vui lòng thử lại.',
+        retryable: true,
+        error: error.message
+      });
+    }
+
     res.status(500).json({
       success: false,
       message: 'Không thể tạo ticket',
