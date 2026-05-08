@@ -13,6 +13,11 @@ const path = require('path');
 // Import User model for getTechnicalUsers
 const User = require("../../models/Users");
 
+/** TICKET_DISABLE_DIRECT_EMAIL=false → gọi email-service trực tiếp (rollback). Ngược lại: qua notification-service stream. */
+function useLegacyDirectTicketEmail() {
+  return String(process.env.TICKET_DISABLE_DIRECT_EMAIL || '').toLowerCase() === 'false';
+}
+
 // Helper function để fix assignedTo null issue sau khi populate
 async function fixAssignedToIfNull(ticket) {
   if (!ticket) return ticket;
@@ -575,21 +580,49 @@ const sendStatusChangeEmail = async (ticket, previousStatus, newStatus, user) =>
       creatorName: ticket.creator.fullname
     });
 
+    const wouldDup =
+      await notificationService.creatorIncludedInTicketStatusStreamRecipients(
+        ticket,
+        newStatus,
+        user?._id,
+      );
+    if (wouldDup) {
+      console.log(
+        `📧 [sendStatusChangeEmail] Bỏ qua — creator đã nằm trong stream push+email (${newStatus}) ticket=${ticket.ticketCode}`,
+      );
+      if (previousStatus === 'Processing' && newStatus === 'Waiting for Customer') {
+        ticket.waitingForCustomerEmailSent = true;
+        await ticket.save();
+      }
+      return;
+    }
+
     const emailServiceUrl = process.env.EMAIL_SERVICE_URL || 'http://localhost:5030';
     const recipientEmail = ticket.creator.email;
 
     console.log(`📧 [sendStatusChangeEmail] Email service URL: ${emailServiceUrl}`);
     console.log(`📧 [sendStatusChangeEmail] Sending status change email for ticket ${ticket.ticketCode} to ${recipientEmail}`);
 
-    // Call email service asynchronously
     const axios = require('axios');
-    await axios.post(`${emailServiceUrl}/notify-ticket-status`, {
-      ticketId: ticket._id.toString(),
-      recipientEmail: recipientEmail
-    }, {
-      timeout: 10000,
-      headers: { 'Content-Type': 'application/json' }
-    });
+    if (useLegacyDirectTicketEmail()) {
+      await axios.post(`${emailServiceUrl}/notify-ticket-status`, {
+        ticketId: ticket._id.toString(),
+        recipientEmail: recipientEmail
+      }, {
+        timeout: 10000,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    } else {
+      await notificationService.publishTicketEmailOnlyEnvelope({
+        route: 'status',
+        recipients: [recipientEmail],
+        ticketId: ticket._id.toString(),
+        ticketCode: ticket.ticketCode || ticket.ticketNumber,
+        title: `Cập nhật ticket ${ticket.ticketCode || ''}`,
+        body: `Trạng thái ticket đã thay đổi sang ${newStatus}.`,
+        notificationType: 'ticket_status_email',
+      });
+    }
 
     // Mark email as sent only for Processing -> Waiting for Customer transition
     if (previousStatus === 'Processing' && newStatus === 'Waiting for Customer') {
@@ -739,31 +772,42 @@ const createTicket = async (req, res) => {
       // Don't fail the request if notification fails
     }
 
-    // 6️⃣ Send ticket creation confirmation email to creator
+    // 6️⃣ Gửi email xác nhận tạo ticket cho creator (qua notification-service stream hoặc legacy axios)
     try {
-      const emailServiceUrl = process.env.EMAIL_SERVICE_URL || 'http://localhost:5030';
       const creatorEmail = req.user.email;
 
       console.log(`📧 [createTicket] Sending ticket creation confirmation email to ${creatorEmail}`);
 
-      // Call email service to send ticket creation notification
       const axios = require('axios');
-      const emailResponse = await axios.post(`${emailServiceUrl}/notify-ticket-creation`, {
-        ticketId: newTicket._id.toString(),
-        recipientEmail: creatorEmail
-      }, {
-        timeout: 10000,
-        headers: { 'Content-Type': 'application/json' }
-      });
+      const emailServiceUrl = process.env.EMAIL_SERVICE_URL || 'http://localhost:5030';
 
-      // Save Message-ID for email threading
-      if (emailResponse.data.success && emailResponse.data.messageId) {
-        newTicket.emailMessageId = emailResponse.data.messageId;
-        await newTicket.save();
-        console.log(`💾 [createTicket] Saved email Message-ID: ${emailResponse.data.messageId}`);
+      if (useLegacyDirectTicketEmail()) {
+        const emailResponse = await axios.post(`${emailServiceUrl}/notify-ticket-creation`, {
+          ticketId: newTicket._id.toString(),
+          recipientEmail: creatorEmail
+        }, {
+          timeout: 10000,
+          headers: { 'Content-Type': 'application/json' }
+        });
+
+        if (emailResponse.data.success && emailResponse.data.messageId) {
+          newTicket.emailMessageId = emailResponse.data.messageId;
+          await newTicket.save();
+          console.log(`💾 [createTicket] Saved email Message-ID: ${emailResponse.data.messageId}`);
+        }
+      } else {
+        await notificationService.publishTicketEmailOnlyEnvelope({
+          route: 'creation',
+          recipients: [creatorEmail],
+          ticketId: newTicket._id.toString(),
+          ticketCode: newTicket.ticketCode,
+          title: 'Xác nhận tạo ticket',
+          body: `Ticket ${newTicket.ticketCode} đã được tạo thành công.`,
+          notificationType: 'ticket_creation_confirmation',
+        });
       }
 
-      console.log(`✅ [createTicket] Ticket creation confirmation email sent to ${creatorEmail}`);
+      console.log(`✅ [createTicket] Ticket creation confirmation email queued/sent to ${creatorEmail}`);
     } catch (emailError) {
       console.error(`❌ [createTicket] Failed to send ticket creation email:`, emailError.message);
       // Don't fail the request if email fails
@@ -1410,15 +1454,29 @@ const assignTicketToMe = async (req, res) => {
         const emailServiceUrl = process.env.EMAIL_SERVICE_URL || 'http://localhost:5030';
         console.log(`📧 [assignTicketToMe] Support team accepted ticket, sending email to ${ticket.creator.email}`);
 
-        // Call email service asynchronously
-        axios.post(`${emailServiceUrl}/notify-ticket-status`, {
-          ticketId: ticket._id.toString(),
-          recipientEmail: ticket.creator.email
-        }, {
-          timeout: 10000,
-          headers: { 'Content-Type': 'application/json' }
-        }).then(response => {
-          console.log(`✅ [assignTicketToMe] Status change email sent to creator:`, response.data);
+        const run = () => {
+          if (useLegacyDirectTicketEmail()) {
+            return axios.post(`${emailServiceUrl}/notify-ticket-status`, {
+              ticketId: ticket._id.toString(),
+              recipientEmail: ticket.creator.email
+            }, {
+              timeout: 10000,
+              headers: { 'Content-Type': 'application/json' }
+            });
+          }
+          return notificationService.publishTicketEmailOnlyEnvelope({
+            route: 'status',
+            recipients: [ticket.creator.email],
+            ticketId: ticket._id.toString(),
+            ticketCode: ticket.ticketCode || ticket.ticketNumber,
+            title: `Ticket ${ticket.ticketCode || ''} đang xử lý`,
+            body: 'Đội hỗ trợ đã tiếp nhận ticket của bạn.',
+            notificationType: 'ticket_status_email',
+          });
+        };
+
+        Promise.resolve(run()).then(response => {
+          console.log(`✅ [assignTicketToMe] Status change email sent to creator:`, response?.data ?? 'stream');
         }).catch(error => {
           console.error(`❌ [assignTicketToMe] Failed to send status change email:`, error.message);
         });
@@ -1524,15 +1582,29 @@ const cancelTicketWithReason = async (req, res) => {
         const emailServiceUrl = process.env.EMAIL_SERVICE_URL || 'http://localhost:5030';
         console.log(`📧 [cancelTicketWithReason] Ticket cancelled, sending email to ${ticket.creator.email}`);
 
-        // Call email service asynchronously
-        axios.post(`${emailServiceUrl}/notify-ticket-status`, {
-          ticketId: ticket._id.toString(),
-          recipientEmail: ticket.creator.email
-        }, {
-          timeout: 10000,
-          headers: { 'Content-Type': 'application/json' }
-        }).then(response => {
-          console.log(`✅ [cancelTicketWithReason] Cancellation email sent to creator:`, response.data);
+        const run = () => {
+          if (useLegacyDirectTicketEmail()) {
+            return axios.post(`${emailServiceUrl}/notify-ticket-status`, {
+              ticketId: ticket._id.toString(),
+              recipientEmail: ticket.creator.email
+            }, {
+              timeout: 10000,
+              headers: { 'Content-Type': 'application/json' }
+            });
+          }
+          return notificationService.publishTicketEmailOnlyEnvelope({
+            route: 'status',
+            recipients: [ticket.creator.email],
+            ticketId: ticket._id.toString(),
+            ticketCode: ticket.ticketCode || ticket.ticketNumber,
+            title: `Ticket ${ticket.ticketCode || ''} đã hủy`,
+            body: 'Ticket của bạn đã được hủy.',
+            notificationType: 'ticket_status_email',
+          });
+        };
+
+        run().then(response => {
+          console.log(`✅ [cancelTicketWithReason] Cancellation email sent to creator:`, response?.data ?? 'stream');
         }).catch(error => {
           console.error(`❌ [cancelTicketWithReason] Failed to send cancellation email:`, error.message);
         });

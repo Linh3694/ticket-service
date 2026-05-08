@@ -73,6 +73,8 @@ class NotificationService {
     body,
     notificationType = 'ticket_event',
     data = {},
+    /** Ví dụ ['push','email'] — fan-out ticket qua notification-service + email-service */
+    channels: channelsOverride = null,
   }) {
     const emails = this.normalizeEmailRecipients(recipients);
     const t = String(title || '').trim();
@@ -95,6 +97,9 @@ class NotificationService {
       body: b,
       type: notificationType,
       channel: 'push',
+      ...(Array.isArray(channelsOverride) && channelsOverride.length
+        ? { channels: channelsOverride }
+        : {}),
       data: {
         ...data,
         type: data.type || notificationType,
@@ -109,6 +114,66 @@ class NotificationService {
     };
     await publishEnvelope(redisClient.getPubClient(), this.channel, payload);
     console.log(`📤 [Ticket Service] Stream notify ${event} → ${emails.length} recipients`);
+  }
+
+  /**
+   * Chỉ gửi email (không push) qua notification-service stream → email-service REST.
+   * Dùng khi trước đây ticket-service gọi trực tiếp /notify-ticket-creation | /notify-ticket-status.
+   *
+   * @param {'creation'|'status'} route — map sang endpoint email-service.
+   */
+  async publishTicketEmailOnlyEnvelope({
+    route,
+    recipients,
+    ticketId,
+    ticketCode,
+    title,
+    body,
+    messageContent,
+    messageSender,
+    notificationType = 'ticket_email',
+  }) {
+    const emails = this.normalizeEmailRecipients(recipients);
+    const t = String(title || '').trim();
+    const b = String(body || '').trim();
+    const tid = ticketId != null ? String(ticketId) : '';
+    if (!emails.length || !tid) {
+      console.warn(
+        '⚠️  [Ticket Service] publishTicketEmailOnlyEnvelope: skip (thiếu email hoặc ticketId)',
+      );
+      return;
+    }
+    const event =
+      route === 'creation' ? 'ticket_creation_email' : 'ticket_status_email';
+    const payload = {
+      service: 'ticket-service',
+      event,
+      kind: 'notify.send',
+      deliverFromStream: true,
+      deliver: true,
+      recipients: emails,
+      title: t || 'Ticket',
+      body: b || ' ',
+      type: notificationType,
+      channels: ['email'],
+      channel: 'email',
+      data: {
+        emailServiceRoute: route,
+        ticketId: tid,
+        ticket_id: tid,
+        ticketCode: ticketCode ?? undefined,
+        ticket_code: ticketCode ?? undefined,
+        ...(messageContent ? { messageContent: String(messageContent) } : {}),
+        ...(messageSender ? { messageSender: String(messageSender) } : {}),
+        type: notificationType,
+        source: 'ticket-service',
+      },
+      timestamp: new Date().toISOString(),
+    };
+    await publishEnvelope(redisClient.getPubClient(), this.channel, payload);
+    console.log(
+      `📧 [Ticket Service] Stream email-only ${event} ticket=${tid} → ${emails.length} recipients`,
+    );
   }
 
   /**
@@ -288,6 +353,7 @@ class NotificationService {
         title,
         body,
         notificationType: 'new_ticket_admin',
+        channels: ['push', 'email'],
         data: {
           ticketId: ticket._id.toString(),
           ticketCode: ticket.ticketCode || ticket.ticketNumber,
@@ -456,8 +522,36 @@ class NotificationService {
     return statusConfigs[status] || null;
   }
 
+  /**
+   * Creator đã nằm trong fan-out stream (push+email) khi đổi trạng thái — tránh gửi email trùng qua sendStatusChangeEmail.
+   */
+  async creatorIncludedInTicketStatusStreamRecipients(ticket, newStatus, changedByUserId) {
+    const recipients = await this.getTicketNotificationRecipients(ticket, newStatus);
+    const actorEmail = changedByUserId
+      ? await this.resolveRecipientEmail(changedByUserId)
+      : null;
+    const filtered = actorEmail
+      ? recipients.filter(
+          (r) => String(r).trim().toLowerCase() !== actorEmail,
+        )
+      : recipients;
+    const creatorId = ticket.createdBy || ticket.creator?._id || ticket.creator;
+    const creatorEmail =
+      ticket.creator?.email ||
+      (creatorId ? await this.getUserEmailById(creatorId) : null);
+    if (!creatorEmail) return false;
+    const ce = creatorEmail.trim().toLowerCase();
+    return filtered.some((r) => String(r).trim().toLowerCase() === ce);
+  }
+
   // Gửi thông báo khi trạng thái ticket thay đổi
-  async sendTicketStatusChangeNotification(ticket, oldStatus, newStatus, changedBy = null) {
+  async sendTicketStatusChangeNotification(
+    ticket,
+    oldStatus,
+    newStatus,
+    changedBy = null,
+    emailExtras = null,
+  ) {
     try {
       console.log(`📢 [Ticket Service] Processing status change event: ${oldStatus} → ${newStatus}`);
 
@@ -514,19 +608,29 @@ class NotificationService {
         .replace('{ticketCode}', ticket.ticketCode || ticket.ticketNumber || 'Unknown')
         .replace('{title}', ticket.title || 'No title');
 
+      const extraContent =
+        emailExtras && typeof emailExtras === 'object' ? emailExtras : {};
       await this.publishInboxPushEnvelope({
         event: 'ticket_status_changed',
         recipients: filteredRecipients,
         title: statusConfig.title,
         body: notifBody,
         notificationType: statusConfig.action,
+        channels: ['push', 'email'],
         data: {
+          type: 'ticket_status_changed',
           ticketId: ticket._id.toString(),
           ticketCode: ticket.ticketCode || ticket.ticketNumber,
           action: statusConfig.action,
           oldStatus,
           newStatus,
           priority: statusConfig.priority,
+          ...(extraContent.messageContent
+            ? { messageContent: String(extraContent.messageContent) }
+            : {}),
+          ...(extraContent.messageSender
+            ? { messageSender: String(extraContent.messageSender) }
+            : {}),
         },
       });
 
@@ -618,6 +722,7 @@ class NotificationService {
         title: notifTitle,
         body: notifBody,
         notificationType: 'new_ticket_admin',
+        channels: ['push', 'email'],
         data: {
           ticketId: ticket._id.toString(),
           ticketCode: ticket.ticketCode || ticket.ticketNumber,

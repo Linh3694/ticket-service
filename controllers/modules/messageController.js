@@ -4,6 +4,10 @@ const { TICKET_LOGS } = require('../../utils/logFormatter');
 const { logMessageSent, logTicketStatusChanged } = require('../../utils/logger');
 const { Types, connection } = require('mongoose');
 
+function useLegacyDirectTicketEmail() {
+  return String(process.env.TICKET_DISABLE_DIRECT_EMAIL || '').toLowerCase() === 'false';
+}
+
 /**
  * Send message to ticket
  */
@@ -141,6 +145,10 @@ const sendMessage = async (req, res) => {
     ticket.updatedAt = new Date();
     await ticket.save();
 
+    /** Nội dung email status (Processing→Waiting) gộp vào stream push+email — tránh gửi hai lần */
+    let statusEmailExtras = null;
+    let markWaitingEmailSentAfterStream = false;
+
     // Log message sent
     try {
       const userEmail = req.user.email || 'unknown';
@@ -182,29 +190,51 @@ const sendMessage = async (req, res) => {
                 console.log(`📧 [sendMessage] Including message content in email: "${messageContent.substring(0, 50)}${messageContent.length > 50 ? '...' : ''}"`);
               }
 
-              // Call email service with message content
+              // Gửi email (legacy axios → email-service | stream → notification-service)
               const axios = require('axios');
-              axios.post(`${emailServiceUrl}/notify-ticket-status`, {
-                ticketId: ticket._id.toString(),
-                recipientEmail: ticket.creator.email,
-                messageContent: messageContent,
-                messageSender: messageSender
-              }, {
-                timeout: 10000,
-                headers: { 'Content-Type': 'application/json' }
-              }).then(async (response) => {
-                console.log(`✅ [sendMessage] Status change email with message sent to customer:`, response.data);
-
-                // Mark email as sent for this status
+              const markSent = async () => {
                 try {
                   await Ticket.findByIdAndUpdate(ticket._id, { waitingForCustomerEmailSent: true });
                   console.log(`✅ [sendMessage] Marked waitingForCustomerEmailSent=true for ticket ${ticket.ticketCode}`);
                 } catch (updateError) {
                   console.error(`❌ [sendMessage] Failed to update waitingForCustomerEmailSent flag:`, updateError.message);
                 }
-              }).catch(error => {
-                console.error(`❌ [sendMessage] Failed to send status change email:`, error.message);
-              });
+              };
+
+              const sendPromise = useLegacyDirectTicketEmail()
+                ? axios.post(`${emailServiceUrl}/notify-ticket-status`, {
+                  ticketId: ticket._id.toString(),
+                  recipientEmail: ticket.creator.email,
+                  messageContent: messageContent,
+                  messageSender: messageSender
+                }, {
+                  timeout: 10000,
+                  headers: { 'Content-Type': 'application/json' }
+                })
+                : Promise.resolve(null);
+
+              if (useLegacyDirectTicketEmail()) {
+                sendPromise
+                  .then(async (response) => {
+                    console.log(
+                      `✅ [sendMessage] Status change email with message sent to customer:`,
+                      response?.data ?? 'legacy',
+                    );
+                    await markSent();
+                  })
+                  .catch((error) => {
+                    console.error(`❌ [sendMessage] Failed to send status change email:`, error.message);
+                  });
+              } else {
+                statusEmailExtras = {
+                  ...(messageContent ? { messageContent } : {}),
+                  ...(messageSender ? { messageSender } : {}),
+                };
+                markWaitingEmailSentAfterStream = true;
+                console.log(
+                  `📧 [sendMessage] Processing→Waiting: nội dung email gộp vào sendTicketStatusChangeNotification (stream)`,
+                );
+              }
             }
           } else if (newStatus === 'Waiting for Customer') {
             // For Waiting for Customer from other statuses (not Processing), send email without message content
@@ -285,8 +315,17 @@ const sendMessage = async (req, res) => {
           ticket,
           oldStatus,
           newStatus,
-          req.user._id
+          req.user._id,
+          statusEmailExtras,
         );
+        if (markWaitingEmailSentAfterStream) {
+          await Ticket.findByIdAndUpdate(ticket._id, {
+            waitingForCustomerEmailSent: true,
+          });
+          console.log(
+            `✅ [sendMessage] Đã đánh dấu waitingForCustomerEmailSent sau stream notify (${ticket.ticketCode})`,
+          );
+        }
       } catch (notificationError) {
         console.error('❌ Status change notification failed:', notificationError.message);
       }
