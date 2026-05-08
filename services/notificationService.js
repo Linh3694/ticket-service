@@ -40,6 +40,21 @@ class NotificationService {
     return String(process.env.TICKET_USE_EXPO_DIRECT_PUSH ?? 'false').toLowerCase().trim() === 'true';
   }
 
+  /**
+   * TICKET_DISABLE_DIRECT_EMAIL=false → gọi email-service bằng axios trong controller (rollback).
+   * unset / true / khác → chỉ stream → notification-service (không axios song song).
+   */
+  useLegacyDirectTicketEmail() {
+    return String(process.env.TICKET_DISABLE_DIRECT_EMAIL || '').toLowerCase() === 'false';
+  }
+
+  /**
+   * Khi legacy: stream chỉ push — tránh vừa axios vừa noti-service cùng gọi email-service (trùng mail).
+   */
+  ticketStreamChannelsWithEmail() {
+    return this.useLegacyDirectTicketEmail() ? ['push'] : ['push', 'email'];
+  }
+
   normalizeEmailRecipients(list) {
     const out = [];
     const seen = new Set();
@@ -60,7 +75,8 @@ class NotificationService {
     const s = String(userIdOrEmail).trim();
     if (!s) return null;
     if (s.includes('@')) return s.toLowerCase();
-    return this.getUserEmailById(s);
+    const fromId = await this.getUserEmailById(s);
+    return fromId ? String(fromId).trim().toLowerCase() : null;
   }
 
   /**
@@ -530,9 +546,10 @@ class NotificationService {
     const actorEmail = changedByUserId
       ? await this.resolveRecipientEmail(changedByUserId)
       : null;
-    const filtered = actorEmail
+    const actorNorm = actorEmail ? String(actorEmail).trim().toLowerCase() : null;
+    const filtered = actorNorm
       ? recipients.filter(
-          (r) => String(r).trim().toLowerCase() !== actorEmail,
+          (r) => String(r).trim().toLowerCase() !== actorNorm,
         )
       : recipients;
     const creatorId = ticket.createdBy || ticket.creator?._id || ticket.creator;
@@ -565,8 +582,9 @@ class NotificationService {
       const recipients = await this.getTicketNotificationRecipients(ticket, newStatus);
 
       const actorEmail = changedBy ? await this.resolveRecipientEmail(changedBy) : null;
-      const filteredRecipients = actorEmail
-        ? recipients.filter((r) => String(r).trim().toLowerCase() !== actorEmail)
+      const actorNorm = actorEmail ? String(actorEmail).trim().toLowerCase() : null;
+      const filteredRecipients = actorNorm
+        ? recipients.filter((r) => String(r).trim().toLowerCase() !== actorNorm)
         : recipients;
 
       if (filteredRecipients.length === 0) {
@@ -616,7 +634,7 @@ class NotificationService {
         title: statusConfig.title,
         body: notifBody,
         notificationType: statusConfig.action,
-        channels: ['push', 'email'],
+        channels: this.ticketStreamChannelsWithEmail(),
         data: {
           type: 'ticket_status_changed',
           ticketId: ticket._id.toString(),
@@ -688,6 +706,23 @@ class NotificationService {
         return;
       }
 
+      const creatorId = ticket.creator?._id || ticket.creator;
+      const creatorEmailForDedupe =
+        ticket.creator?.email ||
+        (creatorId ? await this.getUserEmailById(creatorId) : null);
+      let streamRecipients = supportTeamRecipients;
+      if (creatorEmailForDedupe) {
+        const ce = String(creatorEmailForDedupe).trim().toLowerCase();
+        streamRecipients = supportTeamRecipients.filter(
+          (r) => String(r).trim().toLowerCase() !== ce,
+        );
+        if (streamRecipients.length < supportTeamRecipients.length) {
+          console.log(
+            `🆕 [Ticket Service] Bỏ creator khỏi email IT trên stream (đã có mail xác nhận); còn ${streamRecipients.length} recipient(s)`,
+          );
+        }
+      }
+
       console.log(`🆕 [Ticket Service] Sending event to Frappe for ${supportTeamRecipients.length} support team members`);
 
       // Gửi event về Frappe để Frappe handle notifications
@@ -718,7 +753,7 @@ class NotificationService {
       const notifBody = `Ticket mới #${ticket.ticketCode || ticket.ticketNumber}: ${ticket.title || 'No title'} (${ticket.category})`;
       await this.publishInboxPushEnvelope({
         event: 'new_ticket_created',
-        recipients: supportTeamRecipients,
+        recipients: streamRecipients,
         title: notifTitle,
         body: notifBody,
         notificationType: 'new_ticket_admin',

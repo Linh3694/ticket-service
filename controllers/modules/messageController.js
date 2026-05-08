@@ -5,7 +5,7 @@ const { logMessageSent, logTicketStatusChanged } = require('../../utils/logger')
 const { Types, connection } = require('mongoose');
 
 function useLegacyDirectTicketEmail() {
-  return String(process.env.TICKET_DISABLE_DIRECT_EMAIL || '').toLowerCase() === 'false';
+  return notificationService.useLegacyDirectTicketEmail();
 }
 
 /**
@@ -240,22 +240,28 @@ const sendMessage = async (req, res) => {
             // For Waiting for Customer from other statuses (not Processing), send email without message content
             console.log(`📧 [sendMessage] Sending email for ${oldStatus}->Waiting for Customer transition (without message content)`);
             const { sendStatusChangeEmail } = require('./ticketOperations');
-            sendStatusChangeEmail(ticket, oldStatus, newStatus, req.user).catch(error => {
+            try {
+              await sendStatusChangeEmail(ticket, oldStatus, newStatus, req.user);
+            } catch (error) {
               console.error(`❌ [sendMessage] Failed to send status change email via helper:`, error.message);
-            });
+            }
           } else if (oldStatus === 'Done' || oldStatus === 'Closed') {
             // Customer reopened ticket - always send email
             console.log(`📧 [sendMessage] Customer reopened ticket from ${oldStatus} to ${newStatus}, sending email`);
             const { sendStatusChangeEmail } = require('./ticketOperations');
-            sendStatusChangeEmail(ticket, oldStatus, newStatus, req.user).catch(error => {
+            try {
+              await sendStatusChangeEmail(ticket, oldStatus, newStatus, req.user);
+            } catch (error) {
               console.error(`❌ [sendMessage] Failed to send status change email via helper:`, error.message);
-            });
+            }
           } else {
             // For other status changes, use the helper function
             const { sendStatusChangeEmail } = require('./ticketOperations');
-            sendStatusChangeEmail(ticket, oldStatus, newStatus, req.user).catch(error => {
+            try {
+              await sendStatusChangeEmail(ticket, oldStatus, newStatus, req.user);
+            } catch (error) {
               console.error(`❌ [sendMessage] Failed to send status change email via helper:`, error.message);
-            });
+            }
           }
         } catch (emailErr) {
           console.warn('⚠️ [sendMessage] Failed to initiate status change email:', emailErr.message);

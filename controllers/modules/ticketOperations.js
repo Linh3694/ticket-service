@@ -13,9 +13,9 @@ const path = require('path');
 // Import User model for getTechnicalUsers
 const User = require("../../models/Users");
 
-/** TICKET_DISABLE_DIRECT_EMAIL=false → gọi email-service trực tiếp (rollback). Ngược lại: qua notification-service stream. */
+/** @deprecated dùng notificationService.useLegacyDirectTicketEmail() */
 function useLegacyDirectTicketEmail() {
-  return String(process.env.TICKET_DISABLE_DIRECT_EMAIL || '').toLowerCase() === 'false';
+  return notificationService.useLegacyDirectTicketEmail();
 }
 
 // Helper function để fix assignedTo null issue sau khi populate
