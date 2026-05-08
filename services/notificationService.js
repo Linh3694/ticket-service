@@ -1,4 +1,5 @@
 const redisClient = require('../config/redis');
+const { publishEnvelope } = require('../utils/eventBus');
 const axios = require('axios');
 const { Expo } = require('expo-server-sdk');
 const User = require('../models/Users');
@@ -25,6 +26,89 @@ class NotificationService {
     });
     
     this.setupInterceptors();
+  }
+
+  /** Giữ HTTP Frappe đồng thời với Redis stream — tắt = false để tránh đẩy trùng khi chỉ tin Stream. */
+  parallelFrappeNotifyEnabled() {
+    return (
+      String(process.env.TICKET_PARALLEL_FRAPPE_NOTIFY ?? 'true').toLowerCase().trim() !== 'false'
+    );
+  }
+
+  /** Rollback khẩn: gửi Expo trực tiếp từ ticket-service như code cũ. */
+  useExpoDirectPush() {
+    return String(process.env.TICKET_USE_EXPO_DIRECT_PUSH ?? 'false').toLowerCase().trim() === 'true';
+  }
+
+  normalizeEmailRecipients(list) {
+    const out = [];
+    const seen = new Set();
+    for (const x of list || []) {
+      const e = String(x || '')
+        .trim()
+        .toLowerCase();
+      if (!e || !e.includes('@')) continue;
+      if (seen.has(e)) continue;
+      seen.add(e);
+      out.push(e);
+    }
+    return out;
+  }
+
+  async resolveRecipientEmail(userIdOrEmail) {
+    if (userIdOrEmail == null) return null;
+    const s = String(userIdOrEmail).trim();
+    if (!s) return null;
+    if (s.includes('@')) return s.toLowerCase();
+    return this.getUserEmailById(s);
+  }
+
+  /**
+   * Phase 3: envelope đủ recipients + title/body → notification-service (Stream) gửi Expo + inbox.
+   */
+  async publishInboxPushEnvelope({
+    event,
+    recipients,
+    title,
+    body,
+    notificationType = 'ticket_event',
+    data = {},
+  }) {
+    const emails = this.normalizeEmailRecipients(recipients);
+    const t = String(title || '').trim();
+    const b = String(body || '').trim();
+    if (!emails.length || !t || !b) {
+      console.warn(
+        `⚠️  [Ticket Service] publishInboxPushEnvelope ${event}: skip (thiếu email hoặc title/body)`
+      );
+      return;
+    }
+    const ticketCode = data.ticketCode ?? data.ticket_code;
+    const ticketId = data.ticketId ?? data.ticket_id;
+    const payload = {
+      service: 'ticket-service',
+      event,
+      kind: 'notify.send',
+      deliverFromStream: true,
+      recipients: emails,
+      title: t,
+      body: b,
+      type: notificationType,
+      channel: 'push',
+      data: {
+        ...data,
+        type: data.type || notificationType,
+        action: data.action || notificationType,
+        ticketId,
+        ticket_id: ticketId,
+        ticketCode,
+        ticket_code: ticketCode,
+        source: 'ticket-service',
+      },
+      timestamp: new Date().toISOString(),
+    };
+    await publishEnvelope(redisClient.getPubClient(), this.channel, payload);
+    console.log(`📤 [Ticket Service] Stream notify ${event} → ${emails.length} recipients`);
   }
 
   /**
@@ -111,68 +195,39 @@ class NotificationService {
   async sendNotificationToUser(userId, title, body, data = {}, type = 'system') {
     try {
       console.log(`📢 [Notification] Sending notification to user ${userId}: ${title}`);
-
-      let pushNotificationSent = false;
-      let serviceNotificationSent = false;
-
-      // 1. Gửi push notification trực tiếp qua Expo (nếu có token)
-      const pushTokens = await this.getUserPushTokens(userId);
-      if (pushTokens.length > 0) {
-        try {
-          await this.sendPushNotifications(pushTokens, title, body, data);
-          pushNotificationSent = true;
-          console.log(`✅ [Notification] Sent push notification to user ${userId} with ${pushTokens.length} tokens`);
-        } catch (pushError) {
-          console.error(`❌ [Notification] Push notification failed for user ${userId}:`, pushError.message);
-        }
-      } else {
-        console.log(`ℹ️ [Notification] No push tokens found for user ${userId} (this is normal for web-only users)`);
+      const email = await this.resolveRecipientEmail(userId);
+      if (!email) {
+        console.warn(`⚠️ [Notification] Không resolve được email cho user ${userId}, bỏ qua`);
+        return;
       }
 
-      // 2. Gửi qua notification service (nếu có và khả dụng)
-      if (this.enabled) {
-        try {
-          const notificationData = {
-            type,
-            title,
-            body,
-            recipients: [userId],
-            data,
-            priority: this.getPriorityLevel(data.priority || 'medium'),
-            sound: 'default',
-            badge: 1
-          };
-
-          await this.api.post('/api/notifications/send', notificationData);
-          serviceNotificationSent = true;
-          console.log(`✅ [Notification] Sent service notification to user ${userId}`);
-        } catch (serviceError) {
-          console.warn(`⚠️  [Notification] External notification service failed (${serviceError.response?.status || serviceError.code}), notification may not reach user:`, serviceError.message);
+      if (this.useExpoDirectPush()) {
+        const uid = String(userId);
+        const looksMongo = /^[a-f\d]{24}$/i.test(uid);
+        if (looksMongo) {
+          try {
+            const pushTokens = await this.getUserPushTokens(uid);
+            if (pushTokens.length > 0) {
+              await this.sendPushNotifications(pushTokens, title, body, data);
+            }
+          } catch (pushError) {
+            console.error(`❌ [Notification] Expo direct failed:`, pushError.message);
+          }
         }
-      } else {
-        console.log(`ℹ️ [Notification] External notification service disabled`);
       }
 
-      // 3. Luôn publish to Redis for real-time updates (web app, etc.)
-      await this.publishNotificationEvent('notification_sent', {
-        userId,
+      await this.publishInboxPushEnvelope({
+        event: type || 'user_notification',
+        recipients: [email],
         title,
         body,
-        data,
-        type,
-        pushNotificationSent,
-        serviceNotificationSent,
-        timestamp: new Date()
+        notificationType: type,
+        data:
+          typeof data === 'object' && data !== null
+            ? { ...data, targetUserHint: String(userId) }
+            : { _raw: String(data), targetUserHint: String(userId) },
       });
-      console.log(`✅ [Notification] Published real-time notification event for user ${userId}`);
-
-      // Summary
-      const channels = [];
-      if (pushNotificationSent) channels.push('push');
-      if (serviceNotificationSent) channels.push('service');
-      channels.push('realtime');
-
-      console.log(`📊 [Notification] Notification sent to user ${userId} via: ${channels.join(', ')}`);
+      console.log(`✅ [Notification] Đã publish stream notify → ${email}`);
 
     } catch (error) {
       console.error(`❌ [Notification] Error sending notification to user ${userId}:`, error);
@@ -227,33 +282,23 @@ class NotificationService {
       const title = 'Ticket mới';
       const body = `Ticket mới #${ticket.ticketNumber || ticket.ticketCode}: ${ticket.title}`;
 
-      // Gửi trực tiếp push notifications cho từng recipient
-      for (const userId of recipients) {
-        try {
-          await this.sendNotificationToUser(userId, title, body, {
-            ticketId: ticket._id.toString(),
-            ticketCode: ticket.ticketCode || ticket.ticketNumber,
-            action: 'new_ticket_admin',
-            category: ticket.category,
-            priority: ticket.priority,
-            timestamp: new Date().toISOString()
-          }, 'new_ticket_admin');
-        } catch (error) {
-          console.error(`❌ [Ticket Service] Failed to send new ticket notification to user ${userId}:`, error.message);
-        }
-      }
-
-      console.log(`✅ [Ticket Service] Sent new ticket notification to ${recipients.length} recipients`);
-
-      // Fallback: gửi qua Redis
-      await this.publishNotificationEvent('ticket_created', {
-        ticketId: ticket._id,
-        ticketCode: ticket.ticketCode,
-        title: ticket.title,
-        creator: ticket.creator,
-        assignedTo: ticket.assignedTo,
-        priority: ticket.priority
+      await this.publishInboxPushEnvelope({
+        event: 'new_ticket_created',
+        recipients,
+        title,
+        body,
+        notificationType: 'new_ticket_admin',
+        data: {
+          ticketId: ticket._id.toString(),
+          ticketCode: ticket.ticketCode || ticket.ticketNumber,
+          action: 'new_ticket_admin',
+          category: ticket.category,
+          priority: ticket.priority,
+          timestamp: new Date().toISOString(),
+        },
       });
+
+      console.log(`✅ [Ticket Service] Sent new ticket stream notify to ${recipients.length} recipients`);
 
     } catch (error) {
       console.error('❌ [Ticket Service] Error sending new ticket notification:', error.message);
@@ -287,7 +332,7 @@ class NotificationService {
       timestamp: new Date().toISOString()
     };
 
-    await redisClient.publish(this.channel, notification);
+    await publishEnvelope(redisClient.getPubClient(), this.channel, notification);
     console.log('📢 [Ticket Service] Sent ticket update notification:', ticket.ticketCode, action);
   }
 
@@ -306,7 +351,7 @@ class NotificationService {
       timestamp: new Date().toISOString()
     };
 
-    await redisClient.publish(this.channel, notification);
+    await publishEnvelope(redisClient.getPubClient(), this.channel, notification);
     console.log('📢 [Ticket Service] Sent feedback notification:', ticket.ticketCode);
   }
 
@@ -324,7 +369,7 @@ class NotificationService {
       timestamp: new Date().toISOString()
     };
 
-    await redisClient.publish(this.channel, notification);
+    await publishEnvelope(redisClient.getPubClient(), this.channel, notification);
     console.log('📢 [Ticket Service] Sent new message notification:', ticket.ticketCode);
   }
 
@@ -343,7 +388,7 @@ class NotificationService {
       timestamp: new Date().toISOString()
     };
 
-    await redisClient.publish(this.channel, notification);
+    await publishEnvelope(redisClient.getPubClient(), this.channel, notification);
     console.log('⚠️ [Ticket Service] Sent SLA breach notification:', ticket.ticketCode);
   }
 
@@ -359,7 +404,7 @@ class NotificationService {
       timestamp: new Date().toISOString()
     };
 
-    await redisClient.publish(this.channel, notification);
+    await publishEnvelope(redisClient.getPubClient(), this.channel, notification);
     console.log('👤 [Ticket Service] Sent agent status notification:', agentId, status);
   }
 
@@ -422,12 +467,12 @@ class NotificationService {
         return;
       }
 
-      // Lấy danh sách người nhận
+      // Lấy danh sách người nhận (email đã resolve từ getTicketNotificationRecipients)
       const recipients = await this.getTicketNotificationRecipients(ticket, newStatus);
 
-      // Loại bỏ người thực hiện hành động khỏi danh sách nhận notification
-      const filteredRecipients = changedBy
-        ? recipients.filter(userId => userId.toString() !== changedBy.toString())
+      const actorEmail = changedBy ? await this.resolveRecipientEmail(changedBy) : null;
+      const filteredRecipients = actorEmail
+        ? recipients.filter((r) => String(r).trim().toLowerCase() !== actorEmail)
         : recipients;
 
       if (filteredRecipients.length === 0) {
@@ -437,7 +482,7 @@ class NotificationService {
 
       console.log(`📢 [Ticket Service] Sending event to Frappe for ${filteredRecipients.length} recipients`);
 
-      // Gửi event về Frappe để Frappe handle notifications
+      // Gửi event về Frappe để trigger ERP Notification / Desk (tắt bằng TICKET_PARALLEL_FRAPPE_NOTIFY=false)
       await this.sendEventToFrappe('ticket_status_changed', {
         ticketId: ticket._id.toString(),
         ticketCode: ticket.ticketCode || ticket.ticketNumber,
@@ -465,19 +510,27 @@ class NotificationService {
         }
       });
 
-      // Vẫn publish real-time event cho ticket-service internal use
-      await this.publishNotificationEvent('ticket_status_changed', {
-        ticketId: ticket._id.toString(),
-        ticketCode: ticket.ticketCode || ticket.ticketNumber,
-        title: ticket.title,
-        oldStatus: oldStatus,
-        newStatus: newStatus,
-        changedBy: changedBy,
+      const notifBody = statusConfig.body
+        .replace('{ticketCode}', ticket.ticketCode || ticket.ticketNumber || 'Unknown')
+        .replace('{title}', ticket.title || 'No title');
+
+      await this.publishInboxPushEnvelope({
+        event: 'ticket_status_changed',
         recipients: filteredRecipients,
-        priority: statusConfig.priority
+        title: statusConfig.title,
+        body: notifBody,
+        notificationType: statusConfig.action,
+        data: {
+          ticketId: ticket._id.toString(),
+          ticketCode: ticket.ticketCode || ticket.ticketNumber,
+          action: statusConfig.action,
+          oldStatus,
+          newStatus,
+          priority: statusConfig.priority,
+        },
       });
 
-      console.log(`✅ [Ticket Service] Ticket status change event sent to Frappe for ${ticket.ticketCode}`);
+      console.log(`✅ [Ticket Service] Ticket status change event đã gửi (Frappe optional + Redis stream)`);
     } catch (error) {
       console.error('❌ [Ticket Service] Error sending ticket status change event:', error);
       throw error;
@@ -500,15 +553,6 @@ class NotificationService {
         priority: 'high',
         timestamp: new Date().toISOString()
       }, 'ticket_assignment');
-
-      // Publish real-time event
-      await this.publishNotificationEvent('ticket_assigned', {
-        ticketId: ticket._id.toString(),
-        ticketCode: ticket.ticketCode || ticket.ticketNumber,
-        title: ticket.title,
-        assignedTo: assignedTo._id || assignedTo,
-        assignedBy: assignedBy._id || assignedBy
-      });
 
       console.log(`✅ [Ticket Service] Sent assignment notification for ${ticket.ticketCode}`);
     } catch (error) {
@@ -566,17 +610,24 @@ class NotificationService {
         }
       });
 
-      // Vẫn publish real-time event cho ticket-service internal use
-      await this.publishNotificationEvent('ticket_created', {
-        ticketId: ticket._id.toString(),
-        ticketCode: ticket.ticketCode || ticket.ticketNumber,
-        title: ticket.title,
-        category: ticket.category,
-        priority: ticket.priority,
-        supportTeamRecipients: supportTeamRecipients
+      const notifTitle = 'Ticket mới';
+      const notifBody = `Ticket mới #${ticket.ticketCode || ticket.ticketNumber}: ${ticket.title || 'No title'} (${ticket.category})`;
+      await this.publishInboxPushEnvelope({
+        event: 'new_ticket_created',
+        recipients: supportTeamRecipients,
+        title: notifTitle,
+        body: notifBody,
+        notificationType: 'new_ticket_admin',
+        data: {
+          ticketId: ticket._id.toString(),
+          ticketCode: ticket.ticketCode || ticket.ticketNumber,
+          action: 'new_ticket_admin',
+          category: ticket.category,
+          priority: ticket.priority,
+        },
       });
 
-      console.log(`✅ [Ticket Service] New ticket event sent to Frappe for ${ticket.ticketCode}`);
+      console.log(`✅ [Ticket Service] New ticket event (Frappe optional + stream)`);
     } catch (error) {
       console.error('❌ [Ticket Service] Error sending new ticket event:', error);
       throw error;
@@ -620,16 +671,22 @@ class NotificationService {
         }
       });
 
-      // Vẫn publish real-time event cho ticket-service internal use
-      await this.publishNotificationEvent('user_reply', {
-        ticketId: ticket._id.toString(),
-        ticketCode: ticket.ticketCode || ticket.ticketNumber,
-        title: ticket.title,
-        assignedTo: ticket.assignedTo,
-        messageSender: messageSender._id || messageSender
+      await this.publishInboxPushEnvelope({
+        event: 'user_reply',
+        recipients,
+        title: 'Người dùng đã phản hồi',
+        body: `Ticket #${ticket.ticketCode || ticket.ticketNumber} có phản hồi mới: ${ticket.title || 'No title'}`,
+        notificationType: 'user_reply',
+        data: {
+          ticketId: ticket._id.toString(),
+          ticketCode: ticket.ticketCode || ticket.ticketNumber,
+          action: 'user_reply',
+          messageSender: messageSender._id || messageSender,
+          priority: 'high',
+        },
       });
 
-      console.log(`✅ [Ticket Service] User reply event sent to Frappe for ${ticket.ticketCode}`);
+      console.log(`✅ [Ticket Service] User reply event đã publish stream`);
     } catch (error) {
       console.error('❌ [Ticket Service] Error sending user reply event:', error);
       throw error;
@@ -674,17 +731,23 @@ class NotificationService {
         }
       });
 
-      // Vẫn publish real-time event cho ticket-service internal use
-      await this.publishNotificationEvent('ticket_cancelled_admin', {
-        ticketId: ticket._id.toString(),
-        ticketCode: ticket.ticketCode || ticket.ticketNumber,
-        title: ticket.title,
-        cancelledBy: cancelledBy._id || cancelledBy,
-        cancellationReason: ticket.cancellationReason,
-        recipients: recipients
+      await this.publishInboxPushEnvelope({
+        event: 'ticket_cancelled',
+        recipients,
+        title: 'Ticket đã bị hủy',
+        body: `Ticket #${ticket.ticketCode || ticket.ticketNumber} đã bị hủy: ${ticket.title || 'No title'}`,
+        notificationType: 'ticket_cancelled_admin',
+        data: {
+          ticketId: ticket._id.toString(),
+          ticketCode: ticket.ticketCode || ticket.ticketNumber,
+          action: 'ticket_cancelled_admin',
+          cancelledBy: cancelledBy._id || cancelledBy,
+          cancellationReason: ticket.cancellationReason,
+          priority: 'high',
+        },
       });
 
-      console.log(`✅ [Ticket Service] Ticket cancelled event sent to Frappe for ${ticket.ticketCode}`);
+      console.log(`✅ [Ticket Service] Ticket cancelled đã publish stream`);
     } catch (error) {
       console.error('❌ [Ticket Service] Error sending ticket cancelled event:', error);
       throw error;
@@ -728,16 +791,22 @@ class NotificationService {
         }
       });
 
-      // Vẫn publish real-time event cho ticket-service internal use
-      await this.publishNotificationEvent('completion_confirmed', {
-        ticketId: ticket._id.toString(),
-        ticketCode: ticket.ticketCode || ticket.ticketNumber,
-        title: ticket.title,
-        assignedTo: ticket.assignedTo,
-        confirmedBy: confirmedBy._id || confirmedBy
+      await this.publishInboxPushEnvelope({
+        event: 'completion_confirmed',
+        recipients,
+        title: 'Ticket đã được xác nhận hoàn thành',
+        body: `Ticket #${ticket.ticketCode || ticket.ticketNumber} đã được xác nhận hoàn thành: ${ticket.title || 'No title'}`,
+        notificationType: 'completion_confirmed',
+        data: {
+          ticketId: ticket._id.toString(),
+          ticketCode: ticket.ticketCode || ticket.ticketNumber,
+          action: 'completion_confirmed',
+          confirmedBy: confirmedBy._id || confirmedBy,
+          priority: 'normal',
+        },
       });
 
-      console.log(`✅ [Ticket Service] Completion confirmation event sent to Frappe for ${ticket.ticketCode}`);
+      console.log(`✅ [Ticket Service] Completion confirmation đã publish stream`);
     } catch (error) {
       console.error('❌ [Ticket Service] Error sending completion confirmation event:', error);
       throw error;
@@ -783,17 +852,23 @@ class NotificationService {
         }
       });
 
-      // Vẫn publish real-time event cho ticket-service internal use
-      await this.publishNotificationEvent('ticket_feedback_received', {
-        ticketId: ticket._id.toString(),
-        ticketCode: ticket.ticketCode || ticket.ticketNumber,
-        title: ticket.title,
-        assignedTo: ticket.assignedTo,
-        rating: feedbackData.rating,
-        feedbackComment: feedbackData.comment
+      await this.publishInboxPushEnvelope({
+        event: 'ticket_feedback_received',
+        recipients,
+        title: 'Ticket nhận được đánh giá',
+        body: `Ticket #${ticket.ticketCode || ticket.ticketNumber} nhận được ${feedbackData.rating} sao: ${ticket.title || 'No title'}`,
+        notificationType: 'ticket_feedback_received',
+        data: {
+          ticketId: ticket._id.toString(),
+          ticketCode: ticket.ticketCode || ticket.ticketNumber,
+          action: 'ticket_feedback_received',
+          rating: feedbackData.rating,
+          feedbackComment: feedbackData.comment,
+          priority: 'normal',
+        },
       });
 
-      console.log(`✅ [Ticket Service] Feedback event sent to Frappe for ${ticket.ticketCode}`);
+      console.log(`✅ [Ticket Service] Feedback đã publish stream`);
     } catch (error) {
       console.error('❌ [Ticket Service] Error sending feedback event:', error);
       throw error;
@@ -1033,7 +1108,7 @@ class NotificationService {
         }
       };
 
-      await redisClient.publish(this.channel, notification);
+      await publishEnvelope(redisClient.getPubClient(), this.channel, notification);
       console.log(`📤 [Ticket Service] Published notification event: ${eventType}`);
     } catch (error) {
       console.error('❌ [Ticket Service] Error publishing notification event:', error.message);
@@ -1098,6 +1173,12 @@ class NotificationService {
   // Gửi event về Frappe để trigger notifications
   async sendEventToFrappe(eventType, eventData) {
     try {
+      if (!this.parallelFrappeNotifyEnabled()) {
+        console.log(
+          `ℹ️  [Frappe Integration] bỏ qua HTTP ${eventType} (TICKET_PARALLEL_FRAPPE_NOTIFY=false)`
+        );
+        return;
+      }
       console.log(`🔄 [Frappe Integration] Sending event to Frappe: ${eventType}`);
 
       const frappeEvent = {
@@ -1152,7 +1233,11 @@ class NotificationService {
             source: 'ticket-service'
           }
         };
-        await redisClient.publish('frappe_notifications', JSON.stringify(fallbackEvent));
+        await publishEnvelope(
+          redisClient.getPubClient(),
+          'frappe_notifications',
+          fallbackEvent
+        );
         console.log(`✅ [Frappe Integration] Event sent via Redis fallback: ${eventType}`);
       } catch (redisError) {
         console.error('❌ [Frappe Integration] Redis fallback also failed:', redisError.message);

@@ -218,9 +218,11 @@ exports.getFrappeUsers = async (req, res) => {
       userId: user.email,  // Use email as unique identifier
       fullname: user.fullname,
       email: user.email,
+      username: user.username || '',
       avatarUrl: user.avatarUrl || '',
       department: user.department || '',
-      roles: user.roles || []  // Include Frappe roles for reference
+      roles: user.roles || [],  // Include Frappe roles for reference
+      employeeCode: user.employeeCode || '',
     }));
     
     console.log(`📤 [getFrappeUsers] Returning ${formattedUsers.length} formatted users`);
