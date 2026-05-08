@@ -687,22 +687,38 @@ class NotificationService {
   // ADMIN/SUPPORT TEAM NOTIFICATIONS
   // =========================
 
-  // Gửi thông báo ticket mới cho support team
+  // Gửi thông báo ticket mới — chỉ người được assign (auto-assign); không broadcast cả support DB
   async sendNewTicketToSupportTeamNotification(ticket) {
     try {
-      console.log(`🆕 [Ticket Service] Processing new ticket event for support team: ${ticket.ticketCode}`);
-      console.log(`🆕 [Ticket Service] Ticket category: ${ticket.category}`);
+      console.log(`🆕 [Ticket Service] Notify ticket mới ${ticket.ticketCode} (ưu tiên assignee)`);
+      console.log(`🆕 [Ticket Service] category=${ticket.category}`);
 
-      // Lấy TẤT CẢ support team members (không filter theo category)
-      const supportTeamRecipients = await this.getAllSupportTeamRecipients();
+      const assignedId = ticket.assignedTo?._id || ticket.assignedTo;
+      /** @type {string[]} */
+      let supportTeamRecipients = [];
 
-      console.log(`🆕 [Ticket Service] Found ${supportTeamRecipients.length} support team recipients (all members)`);
+      if (assignedId) {
+        const email = await this.getUserEmailById(assignedId);
+        if (email) {
+          supportTeamRecipients = [String(email).trim().toLowerCase()];
+          console.log(`🆕 [Ticket Service] Chỉ notify assignee: ${supportTeamRecipients[0]}`);
+        }
+      }
+
+      if (!supportTeamRecipients.length) {
+        console.warn(
+          `⚠️ [Ticket Service] Ticket ${ticket.ticketCode} chưa có assignee — fallback notify theo category (không dùng full team)`,
+        );
+        supportTeamRecipients = await this.getSupportTeamRecipients(ticket.category);
+      }
+
+      console.log(`🆕 [Ticket Service] Số recipient(s): ${supportTeamRecipients.length}`);
       if (supportTeamRecipients.length > 0) {
-        console.log(`🆕 [Ticket Service] Recipients emails: ${JSON.stringify(supportTeamRecipients)}`);
+        console.log(`🆕 [Ticket Service] Recipients: ${JSON.stringify(supportTeamRecipients)}`);
       }
 
       if (supportTeamRecipients.length === 0) {
-        console.log(`⚠️ [Ticket Service] No support team members found`);
+        console.log(`⚠️ [Ticket Service] Không có recipient cho ticket mới — bỏ qua`);
         return;
       }
 
